@@ -138,8 +138,8 @@ var earthElevation = new SingleImageElevationLayer({
     max: 0
 });
 var wmsElevation2 = new WMSElevationLayer({
-    id:845,
-    name:"wmsElevation",
+    id: 845,
+    name: "wmsElevation",
     bounds: [-180, -90, 180, 90],
     url: "https://worldwind26.arc.nasa.gov/elev",
     epsg: "EPSG:4326",
@@ -150,8 +150,8 @@ var wmsElevation2 = new WMSElevationLayer({
     maxResolution: 900
 })
 var wmsElevation = new WMSElevationLayer({
-    id:845,
-    name:"wmsElevation",
+    id: 845,
+    name: "wmsElevation",
     bounds: [-180, -90, 180, 90],
     url: "https://worldwind26.arc.nasa.gov/elev",
     epsg: "EPSG:4326",
@@ -166,7 +166,7 @@ var wmsLayer1 = new WMSLayer({
     name: "BlueMarble",
     bounds: [-180, -90, 180, 90],
     url: "https://worldwind25.arc.nasa.gov/wms",
-    format:"png",
+    format: "png",
     layer: "BlueMarble-200412",
     epsg: "EPSG:4326",
     version: "1.3.0",
@@ -194,7 +194,7 @@ var wmsLayer3 = new WMSLayer({
     name: "borders",
     bounds: [-180, -90, 180, 90],
     url: "https://gibs.earthdata.nasa.gov/wms/epsg4326/best/wms.cgi",
-    format:"png",
+    format: "png",
     layer: "GPW_Population_Density_2020",
     epsg: "EPSG:4326",
     version: "1.3.0",
@@ -218,7 +218,7 @@ var singleImage = new SingleImageImageryLayer({
     id: 56445,
     name: "imagery",
     bounds: [-180, -90, 180, 90],
-    url: "http://localhost:8080/worldPurple2.jpg",
+    url: earthElevationImage,
     visible: true
 });
 
@@ -226,21 +226,23 @@ var singleImage = new SingleImageImageryLayer({
 const progressBar = document.getElementById("progressBar");
 var ogc3dTiles = new OGC3DTilesLayer({
     id: 65988,
+    //splats: false,
     name: "OGC 3DTiles",
     visible: true,
-    url: "https://storage.googleapis.com/ogc-3d-tiles/berlinTileset/tileset.json",
+    url: "http://localhost:8082/tileset.json",
     longitude: 0,
     latitude: 0,
-    height: 0,
+    height: 5000,
     yaw: 0,
     pitch: 0,
     roll: 0,
-    scaleX: 1000,
-    scaleY: 1000,
-    scaleZ: 1000,
-    geometricErrorMultiplier: 0.02,
+    scaleX: 10000,
+    scaleY: 10000,
+    scaleZ: 10000,
+    geometricErrorMultiplier: 1,
     loadOutsideView: false,
 });
+
 /* var ogc3dTiles = new OGC3DTilesLayer({
     id: 2,
     name: "OGC 3DTiles",
@@ -278,11 +280,11 @@ var ogc3dTiles = new OGC3DTilesLayer({
         progressBar.innerHTML = (stats.percentageLoaded*100).toFixed(0) + '%';
     }
 }); */
-/* var environmentLayer = new NOAAGFSCloudsLayer({
+var environmentLayer = new NOAAGFSCloudsLayer({
     id: 84,
     name: "clouds"
-}); */
-var environmentLayer = new RandomCloudsLayer({
+});
+/* var environmentLayer = new RandomCloudsLayer({
     id: 84,
     name: "clouds",
     coverage: 0.45,
@@ -291,11 +293,11 @@ var environmentLayer = new RandomCloudsLayer({
     minHeight: 20000,
     maxHeight: 40000,
     quality: 0.5
-});
-const geoJsonLayerLayer = new GeoJsonLayer({
+}); */
+ const geoJsonLayerLayer = new GeoJsonLayer({
     id: 7322,
     name: "geo",
-    geoJson: "http://localhost:8080/countries.geojson",
+    geoJson: "http://localhost:8085/countries.geojson",
     selectable: true,
     maxSegmentLength: 100,
     transparency:0,
@@ -305,14 +307,14 @@ const geoJsonLayerLayer = new GeoJsonLayer({
     selectedPolylineColor: new THREE.Color(0.7,0.5,0.9),
     polygonOpacity: 1.0
 });
-const shpLayer = new SHPLayer({
+/*const shpLayer = new SHPLayer({
     id: 7324,
     name: "shp",
-    shp: "http://localhost:8080/shapefiles_dresden/gis_osm_runways_07_1.shp",
+    shp: "http://192.168.0.170:8081/shapefiles_dresden/gis_osm_runways_07_1.shp",
     selectable: true,
     maxSegmentLength: 100,
     transparency:0
-});
+}); */
 /* var simpleElevationLayer = new SimpleElevationLayer({
     id: 978,
     name: "simpleElevationLayer",
@@ -343,19 +345,20 @@ function setupMap(globalElevationMap) {
 
     let map = new Map({
         divID: 'screen',
-        clock: true,
-        shadows: true,
-        debug: true,
+        clock: { timezone: true },
+        shadows: false,
+        debug: false,
         detailMultiplier: 1.0,
         ocean: false,
         atmosphere: true,
         atmosphereDensity: 1.0,
         sun: true,
         rings: false,
-        space: new THREE.Vector3(1.0,0.2,0.5),
+        space: true,//new THREE.Vector3(1.0,0.2,0.5),
         tileSize: 64,
         loadOutsideView: false,
         minHeightAboveGround: 20,
+        splatsOver:true
         //targetFPS:5000
         /* shadows: true,
         debug: false,
@@ -407,7 +410,15 @@ function setupMap(globalElevationMap) {
     },10); */
     //map.camera.position.set(4019631.932204086,305448.9859209114,4926343.029568041);
     //map.camera.quaternion.copy(new THREE.Quaternion(0.306015242224167,0.6300451739927658,0.6978639828043095,-0.14961153618426734));
-    map.moveAndLookAt({ x: 0, y: 0, z: 10000000 }, { x: 0, y: 5, z: 0 });
+    /* map.moveAndLookAt({ x: 139.83, y: 35.65, z: 10000 }, { x: 139.83, y: 35.7, z: 0 }, {
+        time: 6000, callback: () => {
+            map.moveAndLookAt({ x: -40, y: -35.65, z: 10000 }, { x: -40.1, y: -35.7, z: 0 }, {
+                time: 6000, callback: () => {
+                    map.moveAndLookAt({ x: Math.random()*360, y: Math.random()*180 - 90, z: 10000 }, { x: Math.random()*360, y: Math.random()*180 - 90, z: 0 }, { time: 6000 })
+                }
+            })
+        }
+    }); */
     /* map.controller.clear();
     map.controller.append(new LookAtController(map.camera, map.domContainer, map));
     map.controller.append(new FirstPersonCameraController(map.camera, map.domContainer, map)); */
@@ -415,26 +426,27 @@ function setupMap(globalElevationMap) {
     //map.setLayer(perlinElevation, 0);
     //map.setLayer(shaderLayer, 1);
     //map.setLayer(googleMaps3DTiles, 2);
-    //map.setLayer(ogc3dTiles, 3);
+    map.setLayer(ogc3dTiles, 3);
     map.setLayer(earthElevation, 0);
     map.setLayer(singleImage, 5);
-    //map.setLayer(wmsLayer3, 6);
+    //map.setLayer(environmentLayer, 6);
     map.setLayer(geoJsonLayerLayer, 7);
-    map.addSelectionListener(e=>{
+    map.addSelectionListener(e => {
         //console.log(e)
         const selection = [];
         Object.keys(e.selection).forEach(layerID => {
             const selectedLayer = map.getLayerByID(layerID);
-            if(selectedLayer.isVectorLayer){
-                e.selection[layerID].forEach(selectedObject=>{
+            if (selectedLayer.isVectorLayer) {
+                e.selection[layerID].forEach(selectedObject => {
                     selection.push(selectedLayer.objects[selectedObject.uuid].properties);
                 })
             }
-            
-          });
-          displayObjects(selection);
+
+        });
+        displayObjects(selection);
     })
-    
+
+
 
     /* const geoJsonLayerLayer = new DrapedVectorLayer({
         id: 7322,
@@ -901,12 +913,12 @@ function hslToRgb(h, s, l) {
 function displayObjects(objectsArray) {
     // Check if the container already exists
     let container = document.getElementById('object-display-container');
-    
+
     if (!container) {
         // Create the container div
         container = document.createElement('div');
         container.id = 'object-display-container';
-        
+
         // Apply styles to position it at the top-right corner
         Object.assign(container.style, {
             position: 'fixed',
@@ -923,13 +935,13 @@ function displayObjects(objectsArray) {
             fontFamily: 'Arial, sans-serif',
             fontSize: '14px'
         });
-        
+
         document.body.appendChild(container);
     } else {
         // Clear previous content
         container.innerHTML = '';
     }
-    
+
     // Iterate over each object in the array
     objectsArray.forEach((obj, index) => {
         // Create a wrapper for each object
@@ -939,7 +951,7 @@ function displayObjects(objectsArray) {
             paddingBottom: '10px',
             borderBottom: '1px solid #444'
         });
-        
+
         // Optional: Add a title for each object
         const title = document.createElement('h3');
         title.textContent = `Object ${index + 1}`;
@@ -950,19 +962,19 @@ function displayObjects(objectsArray) {
             paddingBottom: '5px'
         });
         objWrapper.appendChild(title);
-        
+
         // Create a table to display key-value pairs
         const table = document.createElement('table');
         Object.assign(table.style, {
             width: '100%',
             borderCollapse: 'collapse'
         });
-        
+
         // Populate the table with key-value pairs
         for (let key in obj) {
             if (obj.hasOwnProperty(key)) {
                 const row = document.createElement('tr');
-                
+
                 const keyCell = document.createElement('td');
                 keyCell.textContent = key;
                 Object.assign(keyCell.style, {
@@ -971,20 +983,20 @@ function displayObjects(objectsArray) {
                     backgroundColor: '#333',
                     border: '1px solid #555'
                 });
-                
+
                 const valueCell = document.createElement('td');
                 valueCell.textContent = obj[key];
                 Object.assign(valueCell.style, {
                     padding: '4px 8px',
                     border: '1px solid #555'
                 });
-                
+
                 row.appendChild(keyCell);
                 row.appendChild(valueCell);
                 table.appendChild(row);
             }
         }
-        
+
         objWrapper.appendChild(table);
         container.appendChild(objWrapper);
     });

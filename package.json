@@ -1,7 +1,7 @@
 {
     "name": "@jdultra/ultra-globe",
     "sideEffects": false,
-    "version": "7.0.1",
+    "version": "7.0.6",
     "description": "Geospatial lib built with threejs",
     "main": "dist/ultraglobe.cjs.js",
     "module": "dist/ultraglobe.es.js",
@@ -17,7 +17,8 @@
         "build": "vite build --config vite.prod.config.js && npm run build:types",
         "build:types": "tsc --declaration --emitDeclarationOnly --allowJs --outDir dist",
         "generate-docs": "jsdoc --configure jsdoc.json --verbose",
-        "dev": "vite"
+        "dev": "vite build --config vite.config.js --watch",
+        "build:dev": "vite build --config vite.config.js"
     },
     "repository": {
         "type": "git",
@@ -35,20 +36,18 @@
     "author": "Emeric Beaufays",
     "license": "MIT",
     "peerDependencies": {
-        "three": "0.170.0"
+        "three": "^0.171.0"
     },
     "dependencies": {
-        "@jdultra/threedtiles": "^12.0.1",
+        "@jdultra/threedtiles": "13.0.14",
         "cdt2d": "^1.0.0",
         "clean-pslg": "^1.1.2",
+        "date-fns": "^4.1.0",
+        "date-fns-tz": "^3.2.0",
         "earcut": "^3.0.0",
         "egm96-universal": "^1.1.1",
-        "gltf-validator": "^2.0.0-dev.3.9",
         "gopro-telemetry": "^1.2.8",
         "gpmf-extract": "^0.1.2",
-        "lodash": ">=4.17.20",
-        "moment": "^2.29.4",
-        "moment-timezone": "^0.5.43",
         "mp4box": "^0.5.2",
         "noaa-gfs-js": "^1.0.0",
         "path-browserify": "^1.0.1",
@@ -64,15 +63,18 @@
         "@esbuild-plugins/node-globals-polyfill": "^0.2.3",
         "@esbuild-plugins/node-modules-polyfill": "^0.2.2",
         "@laynezh/vite-plugin-lib-assets": "^0.5.24",
-        "@rollup/plugin-node-resolve": "^15.3.0",
+        "@rollup/plugin-commonjs": "^28.0.2",
+        "@rollup/plugin-node-resolve": "^15.3.1",
         "@rollup/plugin-terser": "^0.4.4",
-        "@types/three": "^0.169.0",
+        "@types/three": "^0.171.0",
         "buffer": "^6.0.3",
         "install": "^0.13.0",
         "process": "^0.11.10",
+        "rollup-plugin-polyfill-node": "^0.13.0",
         "rollup-plugin-web-worker-loader": "^1.6.1",
-        "typescript": "^5.6.3",
+        "typescript": "^5.7.2",
         "vite": "^5.4.10",
-        "vite-plugin-node-polyfills": "^0.22.0"
+        "vite-plugin-node-polyfills": "^0.22.0",
+        "vite-plugin-static-copy": "^2.2.0"
     }
 }

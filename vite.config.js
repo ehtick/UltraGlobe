@@ -3,9 +3,13 @@ import { defineConfig } from 'vite';
 import path from 'path';
 
 // Import ESBuild polyfill plugins
-import { NodeGlobalsPolyfillPlugin } from '@esbuild-plugins/node-globals-polyfill';
-import { NodeModulesPolyfillPlugin } from '@esbuild-plugins/node-modules-polyfill';
+import nodePolyfills from 'rollup-plugin-polyfill-node';
+import nodeResolve from '@rollup/plugin-node-resolve';
+import commonjs from '@rollup/plugin-commonjs';
 import inject from '@rollup/plugin-inject';
+
+import { NodeGlobalsPolyfillPlugin } from '@esbuild-plugins/node-globals-polyfill'
+import { NodeModulesPolyfillPlugin } from '@esbuild-plugins/node-modules-polyfill'
 
 export default defineConfig({
   // Define the root directory (default is the current working directory)
@@ -20,8 +24,13 @@ export default defineConfig({
 
   plugins: [
     // Inject global variables where needed
+    nodeResolve({
+      browser: true,
+      preferBuiltins: false
+    }),
+    commonjs(),
+    nodePolyfills(),
     inject({
-      // Automatically inject `process` and `Buffer` where they are used
       process: 'process/browser',
       Buffer: ['buffer', 'Buffer'],
     }),
@@ -41,26 +50,25 @@ export default defineConfig({
     minify: 'esbuild',         // Minifier to use ('esbuild', 'terser', or false)
     emptyOutDir: true,         // Empty the output directory before building
     rollupOptions: {
+      
       input: path.resolve(__dirname, 'index.html'), // Entry point
       plugins: [
-        // Inject plugin to handle globals during build
+        /* // Inject plugin to handle globals during build
         inject({
           process: 'process/browser',
           Buffer: ['buffer', 'Buffer'],
-        }),
+        }), */
       ],
     },
+    
   },
 
   resolve: {
     alias: {
-      // Polyfill Node.js globals
+      'process/browser': 'process/browser',
       global: 'globalThis',
       process: 'process/browser',
-      buffer: 'buffer',
-
-      ...NodeModulesPolyfillPlugin({
-      }),
+      buffer: 'buffer'
     },
   },
 
@@ -78,20 +86,25 @@ export default defineConfig({
       'typedarray-pool',
       'box-intersect',
       'clean-pslg',
-      // Add other Node.js specific packages here
-    ], // Pre-bundle dependencies for faster dev server start
+    ],
     esbuildOptions: {
       // Configure ESBuild to use the polyfill plugins
       define: {
         global: 'globalThis',
         'process.env': '{}',
       },
+      alias: {
+        'process/browser': 'process/browser',
+        global: 'globalThis',
+        process: 'process/browser',
+        buffer: 'buffer'
+      },
       plugins: [
         NodeGlobalsPolyfillPlugin({
-          buffer: true,
           process: true,
+          buffer: true
         }),
-        NodeModulesPolyfillPlugin(),
+        NodeModulesPolyfillPlugin()
       ],
       // Enable browser field in package.json to prefer browser-specific modules
       // This is enabled by default in Vite

@@ -45,6 +45,7 @@ class ZoomController extends Controller {
 		if (e.touches.length == 2) {
 			
 			this.zoomLocation = {x:(e.touches[0].clientX+e.touches[1].clientX)*0.5, y:(e.touches[0].clientY+e.touches[1].clientY)*0.5};
+            console.log("kjh")
 			this.map.screenPixelRayCast(this.zoomLocation.x, this.zoomLocation.y, this.mouseRayCast);
             this.touchZoom = true;
             this.touchDist = Math.sqrt(Math.pow(e.touches[0].clientX-e.touches[1].clientX,2)+Math.pow(e.touches[0].clientY-e.touches[1].clientY,2))
@@ -89,6 +90,7 @@ class ZoomController extends Controller {
     zoomAction() {
         if(!this.zoomLocation) return;
         if(!this.touchZoom){
+            
             this.map.screenPixelRayCast(this.zoomLocation.x, this.zoomLocation.y, this.mouseRayCast);
         }
         // calculate pointOnGlobe and distToGlobeSurface before zoom

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CloudCoverageWorker } from './CloudCoverageWorker.js';
-import { LinkedHashMap } from 'js-utils-z';
+import { LinkedHashMap } from '../../../utils/LinkedHashMap.js';
 
 const cloudsWorkerUrl = URL.createObjectURL(new Blob([CloudCoverageWorker.getScript()], { type: 'application/javascript' }));
 const cloudsWorker = new Worker(cloudsWorkerUrl);

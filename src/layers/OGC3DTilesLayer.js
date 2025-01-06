@@ -2,6 +2,7 @@ import { Layer } from "./Layer";
 import { OGC3DTile, TileLoader } from "@jdultra/threedtiles";
 import * as THREE from 'three';
 import { llhToCartesianFastSFCT } from '../GeoUtils.js';
+import { splatsVertexShader } from "@jdultra/threedtiles";
 
 
 const tileLoaders = [];
@@ -10,11 +11,13 @@ const cartesianLocation = new THREE.Vector3();
 const Up = new THREE.Vector3();
 const East = new THREE.Vector3();
 const North = new THREE.Vector3();
-const globalNorth = new THREE.Vector3(0,0,1);
+const globalNorth = new THREE.Vector3(0, 0, 1);
 const quaternionToEarthNormalOrientation = new THREE.Quaternion();
 const quaternionSelfRotation = new THREE.Quaternion();
 const rotationMatrix = new THREE.Matrix4();
-const rotation = new THREE.Euler(0,0,0, "ZYX");
+const rotation = new THREE.Euler(0, 0, 0, "ZYX");
+
+
 
 /**
  * A layer for loading a OGC3DTiles tileset. 
@@ -30,6 +33,7 @@ class OGC3DTilesLayer extends Layer {
      * @param {string} properties.url url of the root tileset.json
      * @param {boolean} [properties.displayCopyright = false] (optional) display copyright information when present in tiles by concatenating all copyright info for all displayed tiles
      * @param {boolean} [properties.displayErrors = false] (optional) display loading errors
+     * @param {boolean} [properties.splats = false] (optional) specify true when the tileset contains gaussian splats for correct rendering.
      * @param {boolean} [properties.proxy = undefined] (optional) the url to a proxy service. Instead of fetching tiles via a GET request, a POST will be sent to the proxy url with the real tile address in the body of the request.
      * @param {boolean} [properties.queryParams = undefined] (optional) path params to add to individual tile urls (starts with "?").
      * @param {number} [properties.scaleX = 1] - scale on X axes.
@@ -57,21 +61,22 @@ class OGC3DTilesLayer extends Layer {
         }
         super(properties);
         this.isOGC3DTilesLayer = true;
+        this.isSplats = properties.splats;
         const self = this;
         self.properties = properties;
         self.displayCopyright = properties.displayCopyright;
         self.displayErrors = properties.displayErrors;
         self.proxy = properties.proxy;
         self.queryParams = properties.queryParams;
-        
+
         this.move(properties.longitude, properties.latitude, properties.height, properties.yaw, properties.pitch, properties.roll, properties.scaleX, properties.scaleY, properties.scaleZ);
-        
+
 
 
         this.geometricErrorMultiplier = !!properties.geometricErrorMultiplier ? properties.geometricErrorMultiplier : 1.0;
         this.loadingStrategy = !!properties.loadingStrategy ? properties.loadingStrategy : "INCREMENTAL";
         this.updateCallback = !!properties.updateCallback ? properties.updateCallback : undefined;
-        
+
 
         this.url = properties.url;
         this.loadOutsideView = !!properties.loadOutsideView ? properties.loadOutsideView : false;
@@ -80,9 +85,39 @@ class OGC3DTilesLayer extends Layer {
 
         this.selected = false;
         this.selectable = !!properties.selectable;
+
+        if (this.isSplats) {
+            const vertShader = splatsVertexShader();
+            this.splatsDepthMaterial = new THREE.ShaderMaterial(
+                {
+                    uniforms: {
+                        textureSize: { value: null },
+                        numSlices: { value: null },
+                        cov1Texture: { value: null },
+                        cov2Texture: { value: null },
+                        colorTexture: { value: null },
+                        positionTexture: { value: null },
+                        zUpToYUpMatrix3x3: { value: null },
+                        sizeMultiplier: { value: 1 },
+                        cropRadius: { value: Number.MAX_VALUE },
+                        /* cameraNear: { value: undefined },
+                        cameraFar: { value: undefined },
+                        computeLinearDepth: { value: true } */
+                    },
+                    vertexShader: vertShader,
+                    fragmentShader: splatsDepthFragmentShader(),
+                    transparent: true,
+                    side: THREE.FrontSide,
+                    depthTest: false,
+                    depthWrite: false,
+                    //blending: THREE.AdditiveBlending,
+                    glslVersion: THREE.GLSL3
+                }
+            );
+        }
     }
 
-    
+
     getCenter(sfct) {
         sfct.set(this._longitude, this._latitude, this._height);
     }
@@ -227,7 +262,7 @@ class OGC3DTilesLayer extends Layer {
 
                 mesh.material.flatShading = self.properties.flatShading;
 
-                
+
             },
             pointsCallback: (points, geometricError) => {
                 points.material.size = 1 * Math.max(1.0, 0.1 * Math.sqrt(geometricError));
@@ -261,11 +296,18 @@ class OGC3DTilesLayer extends Layer {
 
 
     }
-    
+
 
     _addToScene(scene) {
+        if (this.isSplats) return;
         this.scene = scene;
         scene.add(this.object3D);
+        this.move(this._longitude, this._latitude, this._height, this._yaw, this._pitch, this._roll, this._scaleX, this._scaleY, this._scaleZ);
+    }
+    _addToSplatsScene(splatsScene) {
+        if (!this.isSplats) return;
+        this.scene = splatsScene;
+        splatsScene.add(this.object3D);
         this.move(this._longitude, this._latitude, this._height, this._yaw, this._pitch, this._roll, this._scaleX, this._scaleY, this._scaleZ);
     }
 
@@ -275,15 +317,45 @@ class OGC3DTilesLayer extends Layer {
             if (!!this.updateCallback) {
                 this.updateCallback(stats);
             }
-            try{
+            try {
                 this.tileset.tileLoader.update();
-            }catch(error){
+            } catch (error) {
                 //silence
             }
-            
 
+            
         }
 
+    }
+
+    setRenderMaterial() {
+        if (this.isSplats && this.splatsRenderMaterial) {
+            if (this.tileset.splatsMesh) {
+                this.tileset.splatsMesh.material = this.splatsRenderMaterial;
+            }
+            this.tileset.splatsMesh.material.depthWrite = false;
+            this.tileset.splatsMesh.material.depthTest = false;
+        }
+    }
+    setDepthMaterial(camera) {
+        if (this.isSplats) {
+            if (this.tileset.splatsMesh) {
+                this.splatsRenderMaterial = this.tileset.splatsMesh.material;
+                this.splatsDepthMaterial.uniforms.textureSize.value = this.splatsRenderMaterial.uniforms.textureSize.value;
+                this.splatsDepthMaterial.uniforms.numSlices.value = this.splatsRenderMaterial.uniforms.numSlices.value;
+                this.splatsDepthMaterial.uniforms.cov1Texture.value = this.splatsRenderMaterial.uniforms.cov1Texture.value;
+                this.splatsDepthMaterial.uniforms.cov2Texture.value = this.splatsRenderMaterial.uniforms.cov2Texture.value;
+                this.splatsDepthMaterial.uniforms.colorTexture.value = this.splatsRenderMaterial.uniforms.colorTexture.value;
+                this.splatsDepthMaterial.uniforms.positionTexture.value = this.splatsRenderMaterial.uniforms.positionTexture.value;
+                this.splatsDepthMaterial.uniforms.zUpToYUpMatrix3x3.value = this.splatsRenderMaterial.uniforms.zUpToYUpMatrix3x3.value;
+                this.splatsDepthMaterial.uniforms.sizeMultiplier.value = this.splatsRenderMaterial.uniforms.sizeMultiplier.value;
+                this.splatsDepthMaterial.uniforms.cropRadius.value = this.splatsRenderMaterial.uniforms.cropRadius.value;
+                /*this.splatsDepthMaterial.uniforms.cameraNear.value = camera.near;
+                this.splatsDepthMaterial.uniforms.cameraFar.value = camera.far;
+                this.splatsDepthMaterial.uniforms.computeLinearDepth.value = true; */
+                this.tileset.splatsMesh.material = this.splatsDepthMaterial;
+            }
+        }
     }
 
     /**
@@ -300,9 +372,9 @@ class OGC3DTilesLayer extends Layer {
     * @param {number} [scaleY = 1] - scale on Y axes. defaults to the scaleX property if defined.
     * @param {number} [scaleZ = 1] - scale on Z axes. defaults to the scaleX property if defined.
     */
-    move(longitude, latitude, height = 0, yaw = 0, pitch = 0, roll = 0, scaleX = 1, scaleY = 1, scaleZ = 1 ) {
-        
-        if(!longitude || !latitude) return;
+    move(longitude, latitude, height = 0, yaw = 0, pitch = 0, roll = 0, scaleX = 1, scaleY = 1, scaleZ = 1) {
+
+        if (longitude == undefined || latitude == undefined) return;
         this._longitude = longitude;
         this._latitude = latitude;
         this._height = height;
@@ -312,10 +384,10 @@ class OGC3DTilesLayer extends Layer {
         this._scaleX = scaleX;
         this._scaleY = scaleY;
         this._scaleZ = scaleZ;
-        if(!this.scene) return;
+        if (!this.scene) return;
 
         rotation.set(
-            pitch*0.0174533, yaw*0.0174533, roll*0.0174533, "ZYX");
+            pitch * 0.0174533, yaw * 0.0174533, roll * 0.0174533, "ZYX");
 
         cartesianLocation.set(longitude, latitude, height);
         llhToCartesianFastSFCT(cartesianLocation, false); // Convert LLH to Cartesian in-place
@@ -325,10 +397,10 @@ class OGC3DTilesLayer extends Layer {
         if (East.lengthSq() === 0) {
             East.set(1, 0, 0);
         }
-        
+
         North.crossVectors(East, Up).normalize();
 
-        
+
         rotationMatrix.makeBasis(East, Up, North);
 
         quaternionToEarthNormalOrientation.setFromRotationMatrix(rotationMatrix);
@@ -341,7 +413,7 @@ class OGC3DTilesLayer extends Layer {
 
         this._updateMatrices();
     }
-    _updateMatrices(){
+    _updateMatrices() {
         this.object3D.updateMatrix();
         this.object3D.updateMatrixWorld(true);
         this.tileset.updateMatrices();
@@ -377,9 +449,43 @@ class OGC3DTilesLayer extends Layer {
 
     }
 }
+function splatsDepthFragmentShader() {
+    return `
+precision highp float;
 
-function _updateTileLoaders() {
-    tileLoaders.forEach(tileLoader => tileLoader.update());
-}
+layout(location = 0) out vec4 depth;
+//layout(location = 1) out vec4 alphaAccumulation;
+
+in vec4 color;
+in vec2 vUv;
+in vec3 splatPositionWorld;
+in float splatDepth;
+in float splatCrop;
+uniform float textureSize;
+uniform float cropRadius;
+
+void main() {
+    
+    if(length(splatPositionWorld)>cropRadius) discard;
+    float l = length(vUv);
+    
+    // Early discard for pixels outside the radius
+    if (l > splatCrop) {
+        discard;
+    };
+    
+    vec2 p = vUv * 4.0;
+    float alpha = pow(exp(-dot(p, p)),3.0)*color.w;
+    //if(alpha<0.5) discard;
+
+    depth = vec4(splatDepth,splatDepth,splatDepth,alpha);
+    
+    //depthMultipliedByAlpha = vec4(orthographicDepth*alpha); 
+    //alphaAccumulation = vec4(alpha); 
+    
+}`
+};
+
+
 export { OGC3DTilesLayer }
 

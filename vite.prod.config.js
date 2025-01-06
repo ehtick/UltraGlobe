@@ -4,8 +4,9 @@ import path from 'path';
 import terser from '@rollup/plugin-terser';
 import libAssetsPlugin from '@laynezh/vite-plugin-lib-assets'
 // Import ESBuild polyfill plugins
-import { NodeGlobalsPolyfillPlugin } from '@esbuild-plugins/node-globals-polyfill';
-import { NodeModulesPolyfillPlugin } from '@esbuild-plugins/node-modules-polyfill';
+import nodePolyfills from 'rollup-plugin-polyfill-node';
+import nodeResolve from '@rollup/plugin-node-resolve';
+import commonjs from '@rollup/plugin-commonjs';
 import inject from '@rollup/plugin-inject';
 
 export default defineConfig({
@@ -19,32 +20,7 @@ export default defineConfig({
       'process/browser': 'process/browser',
       global: 'globalThis',
       process: 'process/browser',
-      buffer: 'buffer',
-      // Polyfill Node.js core modules
-      ...NodeModulesPolyfillPlugin(),
-    },
-  },
-  optimizeDeps: {
-    include: [
-      'three',
-      'process',
-      'buffer',
-      'typedarray-pool',
-      'box-intersect',
-      'clean-pslg',
-    ],
-    esbuildOptions: {
-      define: {
-        global: 'globalThis',
-        'process.env': '{}',
-      },
-      plugins: [
-        NodeGlobalsPolyfillPlugin({
-          buffer: true,
-          process: true,
-        }),
-        NodeModulesPolyfillPlugin(),
-      ],
+      buffer: 'buffer'
     },
   },
   build: {
@@ -56,10 +32,9 @@ export default defineConfig({
     },
     outDir: 'dist',
     sourcemap: true,
-    minify: 'esbuild',
     emptyOutDir: true,
     // Disable inlining of assets
-    assetsInlineLimit: 0,
+    assetsInlineLimit: 1024 * 8,
     rollupOptions: {
       // Externalize only dependencies, not assets
       external: ['three', 'proj4', 'epsg-index'],
@@ -75,9 +50,15 @@ export default defineConfig({
   plugins: [
     // Inject global variables
     libAssetsPlugin({
-      include: /\.(gltf|glb|hdr|bin|png|jpe?g|svg|gif|ktx2)(\?.*)?$/,
+      include: /\.(gltf|glb|hdr|png|jpe?g|svg|gif|ktx2)(\?.*)?$/,
       limit: 1024 * 8
     }),
+    nodeResolve({
+      browser: true,
+      preferBuiltins: false
+    }),
+    commonjs(),
+    nodePolyfills(),
     inject({
       process: 'process/browser',
       Buffer: ['buffer', 'Buffer'],
@@ -86,5 +67,16 @@ export default defineConfig({
     terser({
       maxWorkers: 4,
     }),
-  ]
+  ],
+  assetsInclude: [
+    '**/*.gltf',
+    '**/*.glb',
+    '**/*.hdr',
+    '**/*.bin',
+    '**/*.png',
+    '**/*.jpe?g',
+    '**/*.svg',
+    '**/*.gif',
+    '**/*.ktx2'
+  ],
 });

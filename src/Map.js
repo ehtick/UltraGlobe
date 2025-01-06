@@ -15,7 +15,6 @@ import opticalDepth from './images/optical_depth.png';
 import water1 from './images/Water_1_M_Normal.jpg';
 import water2 from './images/Water_2_M_Normal.jpg';
 import perlin from './images/noise2.png';
-import blueNoise from './images/blueNoise.png';
 import { Controller } from "./controls/Controller.js";
 import { getSunPosition } from "./Sun";
 import { CSM } from 'three/examples/jsm/csm/CSM.js';
@@ -27,11 +26,12 @@ import nebulaPalette from './images/paletteNebula.png';
 import { cartesianToLlhFastSFCT, llhToCartesianFastSFCT } from "./GeoUtils.js";
 import { ultraClock } from './controls/clock';
 import { PositionBufferShaderMaterial } from "./materials/PositionBufferShaderMaterial.js";
+import { cameraEase, getCameraLLHYawPitchRoll } from "./utils/CameraHelper.js"
 
 
 // reused variables
-const frustum = new THREE.Frustum();
-const mat = new THREE.Matrix4();
+const tempClearColor = new THREE.Color();
+const splatsClearColor = new THREE.Color(1,1,1);
 const depths = new Uint8Array(4);
 const depth24 = new THREE.Vector3();
 const unpacker = new THREE.Vector3(1, 1 / 256, 1 / (256 * 256));
@@ -65,8 +65,9 @@ class Map {
     * @param {Number} [properties.targetFPS] target FPS: defaults to 60 for desktop and 30 for mobile (FPS may not be precisely respected depending on monitor refresh rate)
     * @param {Number} [properties.tileImagerySize = 256] Resolution of imagery per tile.
     * @param {Boolean} [properties.loadOutsideView = false] loads higher LOD tiles outside view so that they are already loaded when the camera pans and turns
-    * @param {Boolean|Object|THREE.Color} [properties.space = true] if undefined, a default space backgound is drawn. Space can also be a single opaque color as a THREE.Vector3
+    * @param {Boolean|Object|THREE.Color} [properties.space = true] if undefined, a default space backgound is drawn. Space can also be a single opaque color as a THREE.Color
     * @param {number|boolean} [properties.minHeightAboveGround = 5.0] minimum camera height above ground. set to false to disable feature
+    * @param {boolean} [properties.splatsOver = false] render splats over everything else.
     * @param {Boolean} [properties.clock.timezone = false] add time-zone select widget.
     * @param {Boolean} [properties.clock.dateTimePicker = false] add date picker widget.
     * @param {THREE.Vector3} [properties.rings.origin=new THREE.Vector3()] the center point of the rings
@@ -90,7 +91,7 @@ class Map {
         this.previousCameraPosition = new THREE.Vector3();
         this.previousCameraRotation = new THREE.Euler();
         this.loadOutsideView = properties.loadOutsideView ? properties.loadOutsideView : false;
-
+        this.splatsOver = properties.splatsOver?true:false;
         if (properties.targetFPS) {
             self.targetFPS = properties.targetFPS;
         } else {
@@ -132,6 +133,7 @@ class Map {
         this.renderCamera = this.camera.clone();
 
         this.scene = !!properties.scene ? properties.scene : this._initScene(properties.shadows);
+        this.splatsScene = this._initSplatsScene(properties.shadows);
 
         if (properties.space && properties.space.isColor) {
             this.space = false;
@@ -177,6 +179,7 @@ class Map {
         this._setupRenderTarget();
         this._setupPostScene();
         this._setupPostMaterial();
+        this._setupSplatsComposeMaterial();
 
 
         this._setupDepthPassMaterial();
@@ -247,12 +250,15 @@ class Map {
     _prepareLayer(layer) {
         layer._setMap(this);
         layer._addToScene(this.scene);
-        
+
         if (layer.isI3SLayer) {
             layer.addToScene(this.scene, this.camera);
         }
         if (layer.isTracksLayer) {
             layer.addToScene(this.scene, this.camera);
+        }
+        if (layer.isSplats) {
+            layer._addToSplatsScene(this.splatsScene);
         }
     }
 
@@ -292,6 +298,8 @@ class Map {
         return this.layerManager.getLayerByID(id);
     }
 
+    
+
     _layersChangedListener() {
         const self = this;
         return () => {
@@ -317,6 +325,9 @@ class Map {
             })
         }
 
+    }
+    _initSplatsScene() {
+        return new THREE.Scene();
     }
     _initScene() {
         const scene = new THREE.Scene();
@@ -480,11 +491,92 @@ class Map {
         this.targetWorld.depthTexture = new THREE.DepthTexture();
         this.targetWorld.depthTexture.format = THREE.DepthFormat;
         this.targetWorld.depthTexture.type = THREE.FloatType;
+
+        if (this.targetSplats) this.targetSplats.dispose();
+        this.targetSplats = new THREE.WebGLRenderTarget(this.domContainer.offsetWidth, this.domContainer.offsetHeight);
+        this.targetSplats.texture.format = THREE.RGBAFormat;
+        this.targetSplats.texture.colorSpace = THREE.NoColorSpace;
+        this.targetSplats.texture.minFilter = THREE.NearestFilter;
+        this.targetSplats.texture.magFilter = THREE.NearestFilter;
+        this.targetSplats.texture.premultiplyAlpha = false;
+        this.targetSplats.texture.generateMipmaps = false;
+        this.targetSplats.stencilBuffer = false;
+        this.targetSplats.depthBuffer = false;
+
+        if (this.targetSplatsDepth) this.targetSplatsDepth.dispose();
+        this.targetSplatsDepth = new THREE.WebGLRenderTarget(this.domContainer.offsetWidth, this.domContainer.offsetHeight, { count: 1 });
+
+        this.targetSplatsDepth.texture.format = THREE.RedFormat;
+        this.targetSplatsDepth.texture.type = THREE.FloatType;
+        this.targetSplatsDepth.texture.colorSpace = THREE.NoColorSpace;
+        this.targetSplatsDepth.texture.minFilter = THREE.NearestFilter;
+        this.targetSplatsDepth.texture.magFilter = THREE.NearestFilter;
+        this.targetSplatsDepth.texture.premultiplyAlpha = false;
+        this.targetSplatsDepth.texture.generateMipmaps = false;
+        /* this.targetSplatsDepth.textures[0].format = THREE.RedFormat;
+        this.targetSplatsDepth.textures[0].type = THREE.FloatType;
+        this.targetSplatsDepth.textures[0].colorSpace = THREE.NoColorSpace;
+        this.targetSplatsDepth.textures[0].minFilter = THREE.NearestFilter;
+        this.targetSplatsDepth.textures[0].magFilter = THREE.NearestFilter;
+        this.targetSplatsDepth.textures[0].premultiplyAlpha = false;
+        this.targetSplatsDepth.textures[0].generateMipmaps = false;
+
+        this.targetSplatsDepth.textures[1].format = THREE.RedFormat;
+        this.targetSplatsDepth.textures[1].type = THREE.HalfFloatType;
+        this.targetSplatsDepth.textures[1].colorSpace = THREE.NoColorSpace;
+        this.targetSplatsDepth.textures[1].minFilter = THREE.NearestFilter;
+        this.targetSplatsDepth.textures[1].magFilter = THREE.NearestFilter;
+        this.targetSplatsDepth.textures[1].premultiplyAlpha = false;
+        this.targetSplatsDepth.textures[1].generateMipmaps = false; */
+
+        this.targetSplatsDepth.stencilBuffer = false;
+        this.targetSplatsDepth.depthBuffer = false;
+
+        if (this.targetSplatsCompose) this.targetSplatsCompose.dispose();
+        this.targetSplatsCompose = new THREE.WebGLRenderTarget(this.domContainer.offsetWidth, this.domContainer.offsetHeight, { count: 2 });
+        this.targetSplatsCompose.textures[0].format = THREE.RGBAFormat;
+        this.targetSplatsCompose.textures[0].type = THREE.UnsignedByteType;
+        this.targetSplatsCompose.textures[0].colorSpace = THREE.NoColorSpace;
+        this.targetSplatsCompose.textures[0].minFilter = THREE.NearestFilter;
+        this.targetSplatsCompose.textures[0].magFilter = THREE.NearestFilter;
+        this.targetSplatsCompose.textures[0].premultiplyAlpha = false;
+
+        this.targetSplatsCompose.textures[1].format = THREE.RedFormat;
+        this.targetSplatsCompose.textures[1].type = THREE.FloatType;
+        this.targetSplatsCompose.textures[1].colorSpace = THREE.NoColorSpace;
+        this.targetSplatsCompose.textures[1].minFilter = THREE.NearestFilter;
+        this.targetSplatsCompose.textures[1].magFilter = THREE.NearestFilter;
+        this.targetSplatsCompose.textures[1].premultiplyAlpha = false;
+
+        this.targetSplatsCompose.texture.generateMipmaps = false;
+        this.targetSplatsCompose.stencilBuffer = false;
+        this.targetSplatsCompose.depthBuffer = false;
     }
+
 
 
     _setupBlurMaterials() {
 
+
+    }
+    _setupSplatsComposeMaterial() {
+        this.splatsComposeMaterial = new THREE.ShaderMaterial({
+            vertexShader: this._splatsDepthComposeVertexShader(),
+            fragmentShader: this._splatsDepthComposeFragmentShader(),
+            uniforms: {
+                splatsTexture: { value: undefined },
+                otherTexture: { value: undefined },
+                splatsDepthTexture: { value: undefined },
+                otherDepthTexture: { value: undefined },
+                
+                splatsOver: { value: this.splatsOver }
+            },
+            transparent: false,
+            side: THREE.FrontSide,
+            depthTest: false,
+            depthWrite: false,
+            glslVersion: THREE.GLSL3
+        });
 
     }
 
@@ -683,6 +775,7 @@ class Map {
 
 
     }
+
 
     _setupDepthPassMaterial() {
         this.depthPassMaterial = new THREE.ShaderMaterial({
@@ -939,6 +1032,9 @@ class Map {
                     self.scene.position.set(-self.camera.position.x, -self.camera.position.y, -self.camera.position.z);
                     self.scene.updateMatrix();
                     self.scene.updateMatrixWorld(true);
+                    self.splatsScene.position.set(-self.camera.position.x, -self.camera.position.y, -self.camera.position.z);
+                    self.splatsScene.updateMatrix();
+                    self.splatsScene.updateMatrixWorld(true);
                     self.layerManager.layers.forEach((layer) => {
 
                         if (layer.isOGC3DTilesLayer) {
@@ -962,10 +1058,14 @@ class Map {
                 }
 
                 let hasVideo = false;
+                let hasSplats = false;
                 self.layerManager.layers.forEach(layer => {
                     if (layer.isOGC3DTilesLayer) {
 
                         layer.update(self.renderCamera);
+                        if (layer.isSplats) {
+                            hasSplats = true;
+                        }
                     }
                     if (layer.isTracksLayer) {
                         layer.update(clock);
@@ -980,12 +1080,69 @@ class Map {
 
                 //self.camera.updateMatrixWorld();
 
+                /// render
                 self.renderer.setRenderTarget(self.target);
                 self.renderer.render(self.scene, self.renderCamera);
 
+                let renderDepth = self.target.depthTexture;
+                let renderTexture = self.target.texture;
+
+                /// render splats
+                if (hasSplats) {
+                    self.renderer.setRenderTarget(self.targetSplats);
+                    self.renderer.setClearColor(splatsClearColor, 0.0);
+                    self.renderer.clearColor();
+                    self.renderer.render(self.splatsScene, self.renderCamera);
+                    self.layerManager.layers.forEach(layer => {
+                        if (layer.isOGC3DTilesLayer) {
+                            if (layer.isSplats) {
+                                layer.setDepthMaterial(self.renderCamera);
+                            }
+                        }
+                    });
+
+                    self.renderer.setRenderTarget(self.targetSplatsDepth);
+                    self.renderer.getClearColor(tempClearColor);
+                    const tempAlpha = self.renderer.getClearAlpha();
+                    self.renderer.setClearColor(splatsClearColor, 1.0);
+                    self.renderer.clearColor();
+                    self.renderer.render(self.splatsScene, self.renderCamera);
+                    self.renderer.setClearColor(tempClearColor, tempAlpha);
+
+                    self.layerManager.layers.forEach(layer => {
+                        if (layer.isOGC3DTilesLayer) {
+                            if (layer.isSplats) {
+                                layer.setRenderMaterial();
+                            }
+                        }
+                    });
+                    /// compose depth
+
+                    
+                    self.splatsComposeMaterial.uniforms.splatsTexture.value = self.targetSplats.texture;
+                    self.splatsComposeMaterial.uniforms.otherTexture.value = renderTexture;
+                    self.splatsComposeMaterial.uniforms.splatsDepthTexture.value = self.targetSplatsDepth.texture;
+                    self.splatsComposeMaterial.uniforms.otherDepthTexture.value = renderDepth;
+                    self.splatsComposeMaterial.uniforms.splatsOver.value = self.splatsOver;
+
+                    self.renderer.setRenderTarget(self.targetSplatsCompose);
+                    
+                    self.renderer.clearColor();
+                    self.postQuad.material = self.splatsComposeMaterial;
+                    self.renderer.render(self.postScene, self.postCamera);
+                    
+
+                    //renderTexture = self.targetSplatsDepth.texture;
+                    //renderDepth = self.targetSplatsDepth.texture;
+                    renderTexture = self.targetSplatsCompose.textures[0];//self.targetSplatsCompose.textures[0];
+                    
+                    renderDepth = self.targetSplatsCompose.textures[1];
+                    //renderTexture = self.targetSplatsDepth.texture;
+                }
+
 
                 /// depth
-                self.depthPassMaterial.uniforms.tDepth.value = self.target.depthTexture;
+                self.depthPassMaterial.uniforms.tDepth.value = renderDepth;
                 self.depthPassMaterial.uniforms.cameraNear.value = self.camera.near;
                 self.depthPassMaterial.uniforms.cameraFar.value = self.camera.far;
                 self.depthPassMaterial.uniforms.ldf.value = self.logDepthBufFC;
@@ -1013,12 +1170,16 @@ class Map {
 
                 /// video
 
-                let t1 = self.target;
-                let t2 = self.target2;
 
                 //self.camera.updateProjectionMatrix()
 
                 if (hasVideo) {
+
+                    let t1 = self.target;
+                    let t2 = self.target2;
+
+                    let videoLayerCount = 0;
+
                     self.renderer.setRenderTarget(self.targetWorld);
                     //self.renderer.clearDepth();
                     self.scene.overrideMaterial = self.positionBufferMaterial;
@@ -1042,7 +1203,8 @@ class Map {
                                 //self.renderer.clear(true, true, true);
                                 self.renderer.render(self.scene, layer.projectionRenderCamera);
 
-                                self.videoPassMaterial.uniforms.tColor.value = t1.texture;
+                                self.videoPassMaterial.uniforms.tColor.value = videoLayerCount == 0 ? renderTexture : t1.texture;
+                                videoLayerCount++;
                                 self.videoPassMaterial.uniforms.tWorld.value = self.targetWorld.texture;
                                 self.videoPassMaterial.uniforms.tVideoColor.value = layer.texture;
                                 self.videoPassMaterial.uniforms.tVideoWorld.value = layer.renderTarget.texture;
@@ -1074,6 +1236,10 @@ class Map {
 
                         }
                     })
+
+                    if (videoLayerCount > 0) {
+                        renderTexture = t1.texture;
+                    }
                     self.scene.overrideMaterial = null;
                 }
 
@@ -1090,8 +1256,8 @@ class Map {
                 }
 
                 /// post final
-                self.postMaterial.uniforms.tDiffuse.value = t1.texture;
-                self.postMaterial.uniforms.tDepth.value = self.target.depthTexture;
+                self.postMaterial.uniforms.tDiffuse.value = renderTexture;
+                self.postMaterial.uniforms.tDepth.value = renderDepth;
                 self.postMaterial.uniforms.radius.value = self.planet.radius;
 
                 self.postMaterial.uniforms.planetPosition.value = self.planet.position;
@@ -1168,11 +1334,11 @@ class Map {
     }
 
     /**
-     * Moves the camera 1 meter above the ground.
+     * Moves the camera above the ground.
      */
-    moveCameraAboveSurface() {
+    moveCameraAboveSurface(camera = this.camera) {
         let min = this.minHeightAboveGround;
-        let geodeticCameraPosition = this.planet.llhToCartesian.inverse(this.camera.position);
+        let geodeticCameraPosition = this.planet.llhToCartesian.inverse(camera.position);
         B.set(geodeticCameraPosition.x * degreeToRadians, geodeticCameraPosition.y * degreeToRadians);
 
 
@@ -1186,7 +1352,7 @@ class Map {
             if (this.distToGround < this.minHeightAboveGround) {
                 geodeticCameraPosition.z += (this.minHeightAboveGround - this.distToGround);
                 geodeticCameraPosition = this.planet.llhToCartesian.forward(geodeticCameraPosition);
-                this.camera.position.set(geodeticCameraPosition.x, geodeticCameraPosition.y, geodeticCameraPosition.z);
+                camera.position.set(geodeticCameraPosition.x, geodeticCameraPosition.y, geodeticCameraPosition.z);
             }
         } catch (e) { }
 
@@ -1198,10 +1364,10 @@ class Map {
     /**
      * reset the camera up so that the camera roll alligns with the horizon
      */
-    setCameraUp() {
-        this.camera.getWorldDirection(A).normalize();
-        B.crossVectors(this.camera.position, A);
-        this.camera.up.crossVectors(A, B).normalize();
+    setCameraUp(camera = this.camera) {
+        camera.getWorldDirection(A).normalize();
+        B.crossVectors(camera.position, A);
+        camera.up.crossVectors(A, B).normalize();
 
     }
 
@@ -1216,16 +1382,39 @@ class Map {
      * @param {Number} cameraAim.x longitude
      * @param {Number} cameraAim.y latitude
      * @param {Number} cameraAim.z height
+     * @param {Object} [ease = undefined] ease function params
+     *   - [ease.time = 2000] ease total time in ms
+     *   - [ease.function = undefined] defaults to a quadratic ease-in-out function. specify your own function that accepts a number between 0 and 1 and returns a number between 0 and 1.
+     *   - [ease.callback = undefined] callback called with no parameter when the camera movement is finished.
      */
-    moveAndLookAt(cameraPosition, cameraAim) {
+    moveAndLookAt(cameraPosition, cameraAim, ease = undefined) {
+        const self = this;
+        if(!ease){
+            self.camera.position.copy(self.planet.llhToCartesian.forward(cameraPosition));
+            const target = self.planet.llhToCartesian.forward(cameraAim);
+            self.camera.up.copy(self.camera.position).normalize()
+            self.camera.lookAt(target.x, target.y, target.z);
+            self.moveCameraAboveSurface();
+            self.resetCameraNearFar();
+            self.setCameraUp();
+        }
+        else{
+            // first infer yaw pitch roll and camera lon lat height
+            const targetCamera = self.camera.clone();
+            targetCamera.position.copy(self.planet.llhToCartesian.forward(cameraPosition));
+            const target = self.planet.llhToCartesian.forward(cameraAim);
+            targetCamera.up.copy(targetCamera.position).normalize()
+            targetCamera.lookAt(target.x, target.y, target.z);
+            self.moveCameraAboveSurface(targetCamera);
+            self.setCameraUp(targetCamera);
 
-        this.camera.position.copy(this.planet.llhToCartesian.forward(cameraPosition));
-        const target = this.planet.llhToCartesian.forward(cameraAim);
-        this.camera.up.copy(this.camera.position).normalize()
-        this.camera.lookAt(target.x, target.y, target.z);
-        this.moveCameraAboveSurface();
-        this.resetCameraNearFar();
-        this.setCameraUp();
+            cameraEase(self.camera, getCameraLLHYawPitchRoll(self.camera), getCameraLLHYawPitchRoll(targetCamera), ease.time, ease.function, (aCamera)=>{
+                self.moveCameraAboveSurface();
+                self.resetCameraNearFar();
+                self.setCameraUp();
+            }, ease.callback);
+        }
+        
     }
 
 
@@ -1263,25 +1452,25 @@ class Map {
      * @param {THREE.Raycaster} mapRaycaster 
      * @returns {THREE.Vector3} the nearest point along the raycaster ray in lon lat height
      */
-    raycastTerrain(raycaster){
+    raycastTerrain(raycaster) {
         let revert = false;
-        if(!raycaster.layers.isEnabled(0)){
+        if (!raycaster.layers.isEnabled(0)) {
             raycaster.layers.enable(0);
             revert = true;
         }
         const visibleTiles = [];
-        this.planet.traverse(o=>{
-            if(o.isPlanetTile){
+        this.planet.traverse(o => {
+            if (o.isPlanetTile) {
                 visibleTiles.push(o);
             }
         });
         const r = raycaster.intersectObjects(visibleTiles, false);
-        if(r.length>0){
+        if (r.length > 0) {
             r[0].point.sub(this.scene.position);
             cartesianToLlhFastSFCT(r[0].point)
             return r[0].point;
         }
-        
+
     }
 
     _viewZToPerspectiveDepth(viewZ, near, far) {
@@ -1335,7 +1524,7 @@ class Map {
             const layer = layers[i];
             if (layer) {
                 const selection = layer.raycast(this.raycaster);
-                if(selection!=undefined) selectedObjects.push(...selection);
+                if (selection != undefined) selectedObjects.push(...selection);
 
             }
         }
@@ -1357,7 +1546,7 @@ class Map {
                 if (!this.selection[object.layer.id]) {
                     this.selection[object.layer.id] = [];
                 }
-                
+
                 if (!this.selection[object.layer.id].some(obj => obj.uuid === object.uuid)) {
                     this.selection[object.layer.id].push(object);
                     selected.push(object);
@@ -1383,7 +1572,7 @@ class Map {
                 if (!this.selection[object.layer.id]) {
                     this.selection[object.layer.id] = [];
                 }
-                
+
                 if (!unselected.some(obj => obj.uuid === object.uuid)) {
                     this.selection[object.layer.id].push(object);
                     selected.push(object);
@@ -1535,6 +1724,71 @@ class Map {
         document.body.appendChild(panel);
 
     }
+
+    _splatsDepthComposeVertexShader() {
+        return `
+    
+    precision highp float;
+    
+        out vec2 vUv;
+        
+    
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    
+        }`
+    };
+
+    _splatsDepthComposeFragmentShader() {
+        return `
+    precision highp float;
+    precision highp sampler2D;
+
+    #include <packing>
+    
+    layout(location = 0) out vec4 color;
+    layout(location = 1) out vec4 depth;
+
+    uniform sampler2D splatsTexture;
+    uniform sampler2D otherTexture;
+    uniform sampler2D splatsDepthTexture;
+    uniform sampler2D otherDepthTexture;
+    uniform bool splatsOver;
+    in vec2 vUv;
+    
+    
+
+    void main() {
+        float baseDepth = texture(otherDepthTexture, vUv).x;
+        float splatsDepth = texture(splatsDepthTexture, vUv).x;
+        //splatsDepth = mix(splatsDepth, 1.0, step(0.95, splatsDepth));
+
+        vec4 splatsColor = texture(splatsTexture, vUv);
+        vec4 baseColor = texture(otherTexture, vUv);
+        
+        if((splatsOver && splatsDepth<1.0) || splatsDepth<baseDepth){
+            float alpha = splatsColor.w + baseColor.w * (1.0-splatsColor.w );
+            float red = (splatsColor.r*splatsColor.w + baseColor.r*baseColor.w*(1.0-splatsColor.w))/alpha;
+            float green = (splatsColor.g*splatsColor.w + baseColor.g*baseColor.w*(1.0-splatsColor.w))/alpha;
+            float blue = (splatsColor.b*splatsColor.w + baseColor.b*baseColor.w*(1.0-splatsColor.w))/alpha;
+            color = vec4(red, green, blue, alpha);
+            depth = vec4((splatsDepth*splatsColor.w + baseDepth*baseColor.w*(1.0-splatsColor.w))/alpha);
+            if(splatsColor.w<0.8){
+                depth = vec4(baseDepth);
+            }else{
+                depth = vec4((splatsDepth*splatsColor.w + baseDepth*baseColor.w*(1.0-splatsColor.w))/alpha);
+            }
+        }else {
+            float alpha = baseColor.w + splatsColor.w * (1.0-baseColor.w );
+            float red = (baseColor.r*baseColor.w + splatsColor.r*splatsColor.w*(1.0-baseColor.w))/alpha;
+            float green = (baseColor.g*baseColor.w + splatsColor.g*splatsColor.w*(1.0-baseColor.w))/alpha;
+            float blue = (baseColor.b*baseColor.w + splatsColor.b*splatsColor.w*(1.0-baseColor.w))/alpha;
+            color = vec4(red, green, blue, alpha);
+            depth = vec4((baseDepth*baseColor.w + splatsDepth*splatsColor.w*(1.0-baseColor.w))/alpha);
+        }
+    }`
+    };
 }
 
 

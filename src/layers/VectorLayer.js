@@ -404,6 +404,7 @@ class VectorLayer extends ImageryLayer {
         return Promise.all(polygonPromisses).then(() => {
             const polygonGeometry = BufferGeometryUtils.mergeGeometries(polygonGeometries, false);
             polygonGeometry.computeBoundingBox();
+            polygonGeometry.computeBoundingSphere();
             self.drapedBatchedPolygon.setInstanceCount(self.drapedBatchedPolygon.maxInstanceCount + 1);
             self.drapedPolygonMaxVertexCount += polygonGeometry.attributes.position.array.length
             self.drapedPolygonMaxIndexCount += polygonGeometry.index.array.length
@@ -416,9 +417,12 @@ class VectorLayer extends ImageryLayer {
             self.objects[properties.uuid].polygonInstanceID = instanceID;
             self.objects[properties.uuid].polygonbbox = polygonGeometry.boundingBox;
 
-            if (!updateLater) {
+            if (!self.drapedBatchedPolygon.boundingBox || !self.drapedBatchedPolygon.boundingSphere) {
                 self.drapedBatchedPolygon.computeBoundingBox();
                 self.drapedBatchedPolygon.computeBoundingSphere();
+            }else{
+                self.drapedBatchedPolygon.boundingBox.union(polygonGeometry.boundingBox);
+                self.drapedBatchedPolygon.boundingSphere.union(polygonGeometry.boundingSphere);
             }
 
             if (lineGeometries.length > 0) {
