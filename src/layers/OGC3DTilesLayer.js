@@ -3,6 +3,7 @@ import { OGC3DTile, TileLoader } from "@jdultra/threedtiles";
 import * as THREE from 'three';
 import { llhToCartesianFastSFCT } from '../GeoUtils.js';
 import { splatsVertexShader } from "@jdultra/threedtiles";
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 
 const tileLoaders = [];
@@ -52,6 +53,12 @@ class OGC3DTilesLayer extends Layer {
      * @param {boolean} [properties.visible = true] layer will be rendered if true (true by default)
      * @param {string} [properties.loadingStrategy = "INCREMENTAL"] loading strategy, "INCREMENTAL" (default) or "IMMEDIATE". "IMMEDIATE" mode loads only the ideal LOD while "INCREMENTAL" loads intermediate LODs.
      * @param {Function} [properties.updateCallback = undefined] A callback called on every tileset update with a stats object indicating number of tiles loaded/visualized, max loaded LOD, and percentage of the tileset loaded
+     * @param {Function} [properties.meshCallback = undefined] A callback called on every tileset update with a stats object indicating number of tiles loaded/visualized, max loaded LOD, and percentage of the tileset loaded
+     * @param {Function} [properties.pointsCallback = undefined] A callback called on every tileset update with a stats object indicating number of tiles loaded/visualized, max loaded LOD, and percentage of the tileset loaded
+     * @param {Number} [properties.cacheSize = 0] A callback called on every tileset update with a stats object indicating number of tiles loaded/visualized, max loaded LOD, and percentage of the tileset loaded
+     * @param {Number} properties.splatsCropRadius a crop radius around the center of a splats tileset.
+     * @param {boolean} [properties.receiveShadow = true] mesh receive shadows.
+     * @param {boolean} [properties.castShadow = true] mesh casts shadows.
      *
      */
     constructor(properties) {
@@ -60,6 +67,12 @@ class OGC3DTilesLayer extends Layer {
             throw "Bad instanciation, OGC3DTilesLayer requires properties."
         }
         super(properties);
+        if (properties.splatsCropRadius) this.splatsCropRadius = properties.splatsCropRadius;
+        this.meshCallback = properties.meshCallback;
+        this.pointsCallback = properties.pointsCallback;
+        this.receiveShadow = properties.receiveShadow == undefined?true:properties.receiveShadow;
+        this.castShadow = properties.castShadow == undefined?true:properties.castShadow;
+        this.cacheSize = properties.cacheSize ? properties.cacheSize : 0;
         this.isOGC3DTilesLayer = true;
         this.isSplats = properties.splats;
         const self = this;
@@ -117,7 +130,12 @@ class OGC3DTilesLayer extends Layer {
         }
     }
 
-
+    setSplatsCropRadius(radius) {
+        this.splatsCropRadius = radius;
+        if (this.tileset != undefined) {
+            this.tileset.setSplatsCropRadius(radius);
+        }
+    }
     getCenter(sfct) {
         sfct.set(this._longitude, this._latitude, this._height);
     }
@@ -231,8 +249,9 @@ class OGC3DTilesLayer extends Layer {
 
         var tileLoader = !!self.properties.tileLoader ? self.properties.tileLoader : new TileLoader({
             renderer: map.renderer,
-            maxCachedItems: 0,
+            maxCachedItems: self.cacheSize,
             meshCallback: (mesh, geometricError) => {
+                mesh.material.flatShading = self.properties.flatShading;
                 //mesh.material = new THREE.MeshLambertMaterial({color: new THREE.Color("rgb("+(Math.floor(Math.random()*256))+", "+(Math.floor(Math.random()*256))+", "+(Math.floor(Math.random()*256))+")")});
                 if (mesh.material.isMeshBasicMaterial) {
                     const newMat = new THREE.MeshStandardMaterial();
@@ -249,26 +268,33 @@ class OGC3DTilesLayer extends Layer {
                 if (!mesh.geometry.getAttribute('normal')) {
                     mesh.geometry.computeVertexNormals();
                 }
+                
                 if (map.csm) {
                     mesh.material.side = THREE.FrontSide;
-                    mesh.castShadow = true
-                    mesh.receiveShadow = true;
-                    mesh.parent.castShadow = true
-                    mesh.parent.receiveShadow = true;
+                    mesh.castShadow = self.castShadow
+                    mesh.receiveShadow = self.receiveShadow;
+                    mesh.parent.castShadow = self.castShadow
+                    mesh.parent.receiveShadow = self.receiveShadow;
 
                     mesh.material.shadowSide = THREE.BackSide;
                     map.csm.setupMaterial(mesh.material);
                 }
 
-                mesh.material.flatShading = self.properties.flatShading;
 
+                if (!!self.meshCallback) {
+                    self.meshCallback(mesh, geometricError);
+                }
 
             },
             pointsCallback: (points, geometricError) => {
+
                 points.material.size = 1 * Math.max(1.0, 0.1 * Math.sqrt(geometricError));
                 points.material.sizeAttenuation = true;
                 points.material.receiveShadow = false;
                 points.material.castShadow = false;
+                if (!!self.pointsCallback) {
+                    self.pointsCallback(points, geometricError);
+                }
             }
         });
         this.tileset = new OGC3DTile({
@@ -285,6 +311,9 @@ class OGC3DTilesLayer extends Layer {
             centerModel: self.centerModel,
             loadingStrategy: self.loadingStrategy
         });
+        if (this.splatsCropRadius != undefined) {
+            this.tileset.setSplatsCropRadius(1e+2);
+        }
 
         this.object3D = new THREE.Object3D();
         this.object3D.matrixAutoUpdate = false;
@@ -323,7 +352,7 @@ class OGC3DTilesLayer extends Layer {
                 //silence
             }
 
-            
+
         }
 
     }
@@ -459,6 +488,7 @@ layout(location = 0) out vec4 depth;
 in vec4 color;
 in vec2 vUv;
 in vec3 splatPositionWorld;
+in vec3 splatPositionModel;
 in float splatDepth;
 in float splatCrop;
 uniform float textureSize;
@@ -466,7 +496,7 @@ uniform float cropRadius;
 
 void main() {
     
-    if(length(splatPositionWorld)>cropRadius) discard;
+    if(length(splatPositionModel)>cropRadius) discard;
     float l = length(vUv);
     
     // Early discard for pixels outside the radius
@@ -475,7 +505,7 @@ void main() {
     };
     
     vec2 p = vUv * 4.0;
-    float alpha = pow(exp(-dot(p, p)),3.0)*color.w;
+    float alpha = pow(exp(-dot(p, p)),1.8)*color.w;
     //if(alpha<0.5) discard;
 
     depth = vec4(splatDepth,splatDepth,splatDepth,alpha);
@@ -488,4 +518,3 @@ void main() {
 
 
 export { OGC3DTilesLayer }
-

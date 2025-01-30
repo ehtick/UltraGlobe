@@ -34,5 +34,6 @@ export { SelectController } from "./controls/SelectController";
 export { ZoomController } from "./controls/ZoomController";
 export { LookAtController } from "./controls/LookAtController";
 export { ThirdPersonCameraController } from "./controls/ThirdPersonCameraController";
+export { getCameraLLHYawPitchRoll, setCameraFromLLHYawPitchRollFov } from "./utils/CameraHelper";
 export {transform} from "./transform/Transformer";
 export * as GeoUtils from "./GeoUtils";

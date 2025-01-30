@@ -74,7 +74,7 @@ class RandomCloudsLayer extends CloudsLayer {
      */
     constructor(properties) {
         properties.sampleDensityFunction = defaultSampleDensityFunction;
-        properties.extraUniforms = {"coverage": properties.coverage?properties.coverage:0.2}
+        properties.extraUniforms = {"coverage": properties.coverage!=undefined?properties.coverage:0.4}
         super(properties);
         
     }

@@ -72,6 +72,7 @@ class Layer {
             this.listeners[element](this, VISIBILITY_CHANGE);
         }
     }
+    
 
     /**
      * 

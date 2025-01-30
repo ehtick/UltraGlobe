@@ -9,6 +9,8 @@ let cloudsTarget;
 let cloudsBlurTarget1;
 let cloudsBlurTarget2;
 let cloudsMaterial;
+let cloudsMaterialNoShadows;
+let cloudsMaterialShadows;
 let blurMaterial;
 const previousCameraPositon = new THREE.Vector3();
 const previousCameraQuaternion = new THREE.Quaternion();
@@ -168,7 +170,7 @@ class CloudsLayer extends EnvironmentLayer {
         cloudsMaterial.uniforms.radius.value = map.planet.radius;
         cloudsMaterial.uniforms.xfov.value = 2 * Math.atan(Math.tan(map.camera.fov * Math.PI / 180 / 2) * map.camera.aspect) * 180 / Math.PI;
         cloudsMaterial.uniforms.yfov.value = map.camera.fov;
-        cloudsMaterial.uniforms.resolution.value = cloudsTarget.height,
+        cloudsMaterial.uniforms.resolution.value = cloudsTarget.height;
         cloudsMaterial.uniforms.planetPosition.value = map.planet.position;
         cloudsMaterial.uniforms.nonPostCameraPosition.value = map.camera.position;
         cloudsMaterial.uniforms.ldf.value = map.logDepthBufFC;
@@ -189,9 +191,8 @@ class CloudsLayer extends EnvironmentLayer {
         cloudsMaterial.uniforms.right.value.crossVectors(map.camera.up, cloudsMaterial.uniforms.viewCenterFar.value);
         cloudsMaterial.uniforms.viewCenterFar.value.multiplyScalar(map.camera.far).add(map.camera.position);
         cloudsMaterial.uniforms.viewCenterNear.value.multiplyScalar(map.camera.near).add(map.camera.position);
-        if (map.shadows) {
-            cloudsMaterial.uniforms.sunLocation.value.copy(map.sunPosition);
-        }
+        
+        cloudsMaterial.uniforms.sunLocation.value.copy(map.sunPosition);
 
         cloudsMaterial.uniforms.time.value = clock.getElapsedTime()*1000;
 
@@ -207,6 +208,12 @@ class CloudsLayer extends EnvironmentLayer {
         cloudsBlurTarget2.setSize(Math.floor(dom.offsetWidth), Math.floor(dom.offsetHeight));
     }
 
+    _setShadows(){
+        cloudsMaterial = cloudsMaterialShadows;
+    }
+    _setNoShadows(){
+        cloudsMaterial = cloudsMaterialNoShadows;
+    }
     _init(map) {
         const self = this;
         self.isInitialized = true;
@@ -224,7 +231,7 @@ class CloudsLayer extends EnvironmentLayer {
             cloudsTarget.textures[1].format = THREE.RedFormat;
             cloudsTarget.textures[1].type = THREE.HalfFloatType;
             cloudsTarget.textures[1].colorSpace = THREE.LinearSRGBColorSpace;
-            cloudsTarget.textures[1].minFilter = THREE.NearestFilter;
+            cloudsTarget.textures[1].minFilter = THREE.LinearFilter;
             cloudsTarget.textures[1].magFilter = THREE.LinearFilter;
             cloudsTarget.textures[1].generateMipmaps = false;
             cloudsTarget.textures[1].premultiplyAlpha = false;
@@ -267,11 +274,49 @@ class CloudsLayer extends EnvironmentLayer {
 
 
 
-        if (cloudsMaterial) cloudsMaterial.dispose();
+        if (cloudsMaterialShadows) cloudsMaterialShadows.dispose();
+        if(cloudsMaterialNoShadows) cloudsMaterialNoShadows.dispose();
 
-        cloudsMaterial = new THREE.ShaderMaterial({
+        cloudsMaterialShadows = new THREE.ShaderMaterial({
             vertexShader: CloudsShader.vertexShader(),
-            fragmentShader: map.shadows ? CloudsShader.fragmentShaderShadows(!!map.ocean, map.rings,map.atmosphere, map.sunColor, self.sampleDensityFunction, self.extraUniforms) : CloudsShader.fragmentShader(!!map.ocean, map.atmosphere, map.sunColor, self.sampleDensityFunction, self.extraUniforms),
+            fragmentShader: CloudsShader.fragmentShaderShadows(!!map.ocean, map.rings,map.atmosphere, map.sunColor, self.sampleDensityFunction, self.extraUniforms),
+            uniforms: {
+                cameraNear: { value: map.camera.near },
+                cameraFar: { value: map.camera.far },
+                perlinWorley: { value: null },
+                noise2D: { value: null },
+                tDepth: { value: null },
+                radius: { value: 0 },
+                xfov: { value: 0 },
+                yfov: { value: 0 },
+                resolution: {value: cloudsTarget.height},
+                planetPosition: { value: new THREE.Vector3(0, 0, 0) },
+                nonPostCameraPosition: { value: new THREE.Vector3(0, 0, 0) },
+                viewCenterFar: { value: new THREE.Vector3(0, 0, 0) },
+                viewCenterNear: { value: new THREE.Vector3(0, 0, 0) },
+                up: { value: new THREE.Vector3(0, 0, 0) },
+                right: { value: new THREE.Vector3(0, 0, 0) },
+                ldf: { value: 0 },
+                time: { value: 0.0 },
+                proportionSamples: { value: self.proportionSamples },
+                densityMultiplier: { value: 20.0 },
+                sunlight: { value: 10.0 },
+                sunLocation: { value: new THREE.Vector3(0, 0, 0) },
+                color: { value: new THREE.Vector3(1.0, 1.0, 1.0) },
+                startRadius: { value: self.startRadius },
+                endRadius: { value: self.endRadius },
+                windSpeed: { value: self.windspeed },
+                windDirection: { value: new THREE.Vector3(1.0, 0.0) },
+                quality: {value: self.quality},
+                ringsPalette: { value: null },
+            },
+            depthTest: false,
+            depthWrite: false
+        });
+
+        cloudsMaterialNoShadows = new THREE.ShaderMaterial({
+            vertexShader: CloudsShader.vertexShader(),
+            fragmentShader: CloudsShader.fragmentShader(!!map.ocean, map.atmosphere, map.sunColor, self.sampleDensityFunction, self.extraUniforms),
             uniforms: {
                 cameraNear: { value: map.camera.near },
                 cameraFar: { value: map.camera.far },
@@ -308,9 +353,12 @@ class CloudsLayer extends EnvironmentLayer {
 
         if (this.extraUniforms) {
             Object.entries(this.extraUniforms).forEach(([key, value]) => {
-                cloudsMaterial.uniforms[key] = { value: value };
+                cloudsMaterialShadows.uniforms[key] = { value: value };
+                cloudsMaterialNoShadows.uniforms[key] = { value: value };
             });
         }
+        cloudsMaterial = map.shadows? cloudsMaterialShadows: cloudsMaterialNoShadows;
+
 
         if (blurMaterial) blurMaterial.dispose();
         blurMaterial = new THREE.ShaderMaterial({
@@ -356,14 +404,18 @@ class CloudsLayer extends EnvironmentLayer {
                         }
                     )
                     ]).then(() => {
-                    cloudsMaterial.uniforms.perlinWorley.value = perlinWorley3DDataTexture;
-                    cloudsMaterial.uniforms.noise2D.value = blueNoiseTexture;
+                    cloudsMaterialNoShadows.uniforms.perlinWorley.value = perlinWorley3DDataTexture;
+                    cloudsMaterialNoShadows.uniforms.noise2D.value = blueNoiseTexture;
+                    cloudsMaterialShadows.uniforms.perlinWorley.value = perlinWorley3DDataTexture;
+                    cloudsMaterialShadows.uniforms.noise2D.value = blueNoiseTexture;
                     blurMaterial.uniforms.noise2D.value = blueNoiseTexture;
                 });
             }
         } else {
-            cloudsMaterial.uniforms.perlinWorley.value = perlinWorley3DDataTexture;
-            cloudsMaterial.uniforms.noise2D.value = blueNoiseTexture;
+            cloudsMaterialNoShadows.uniforms.perlinWorley.value = perlinWorley3DDataTexture;
+            cloudsMaterialNoShadows.uniforms.noise2D.value = blueNoiseTexture;
+            cloudsMaterialShadows.uniforms.perlinWorley.value = perlinWorley3DDataTexture;
+            cloudsMaterialShadows.uniforms.noise2D.value = blueNoiseTexture;
             blurMaterial.uniforms.noise2D.value = blueNoiseTexture;
         }
     }

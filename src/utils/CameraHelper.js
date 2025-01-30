@@ -168,32 +168,9 @@ export function cameraEase(camera, start, end, time = 2000, easeFunction = undef
     for(let i = 0; i<coordinates.length; i++){
 
         const p = new THREE.Vector3(coordinates[i][0], coordinates[i][1], coordinates[i][2]+(h*Math.sin((i/(coordinates.length-1))*Math.PI)));
-        console.log(h);
         llhToCartesianFastSFCT(p);
         positions.push(p);
     }
-    /* coordinates.forEach(c=>{
-        const p = new THREE.Vector3(c[0], c[1], c[2]);
-        llhToCartesianFastSFCT(p);
-        positions.push(p);
-    }) */
-
-    /* const startPoint = start.llh.clone();
-    const endPoint = end.llh.clone();
-    const startTop = start.llh.clone();
-    const endTop = end.llh.clone();
-    startTop.z+=d;
-    endTop.z+=d;
-    const hInter = (startTop.z+endTop.z)/2;
-    llhToCartesianFastSFCT(startPoint);
-    llhToCartesianFastSFCT(endPoint);
-    llhToCartesianFastSFCT(startTop);
-    llhToCartesianFastSFCT(endTop);
-
-    const intermediate = startPoint.clone().lerp(endPoint, 0.5);
-    cartesianToLlhFastSFCT(intermediate);
-    intermediate.z = hInter;
-    llhToCartesianFastSFCT(intermediate); */
 
     
     const positionCurve = new THREE.CatmullRomCurve3(positions);
@@ -208,11 +185,11 @@ export function cameraEase(camera, start, end, time = 2000, easeFunction = undef
         
         const tEase = easeFunction(t);
         positionCurve.getPoint(tEase, camera.position);
-        yaw = lerp(start.yaw, end.yaw, t);
-        pitch = lerp(start.pitch, end.pitch, t);
-        pitch = lerp(pitch, -89, Math.sin(t*Math.PI))
-        roll = lerp(start.roll, end.roll, t);
-        roll = lerp(roll, 0, Math.sin(t*Math.PI))
+        yaw = lerp(start.yaw, end.yaw, tEase);
+        pitch = lerp(start.pitch, end.pitch, tEase);
+        pitch = lerp(pitch, Math.min(-70,pitch), Math.sin(tEase*Math.PI))
+        roll = lerp(start.roll, end.roll, tEase);
+        roll = lerp(roll, 0, Math.sin(tEase*Math.PI))
         cartesianToLlhFastSFCT(camera.position);
         setCameraFromLLHYawPitchRollFov(camera, camera.position,yaw, pitch, roll);
         if(onMoveCallback) onMoveCallback(camera);

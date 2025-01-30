@@ -1,5 +1,6 @@
 import {OGC3DTilesLayer} from "./OGC3DTilesLayer"
 
+
 /**
  * A layer that displays google maps 3DTiles.
  * Note that the regular OGC3DTilesLayer can be used but this layer handles default settings specific to google maps 3D tiles
@@ -30,6 +31,7 @@ class GoogleMap3DTileLayer extends OGC3DTilesLayer {
         properties.url= "https://tile.googleapis.com/v1/3dtiles/root.json";
         properties.queryParams =  { key: properties.apiKey };
         if (!properties.geometricErrorMultiplier) properties.geometricErrorMultiplier = isMobileDevice()?0.3:1.0;
+        //properties.receiveShadow = properties.receiveShadow == undefined? false: properties.receiveShadow;
         super(properties);
         this.isGoogleMaps3DTilesLayer = true;
     }

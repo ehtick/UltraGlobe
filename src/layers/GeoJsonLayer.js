@@ -38,7 +38,7 @@ class GeoJsonLayer extends VectorLayer {
 
         if(typeof properties.geoJson === 'object'){
             self._decode(properties.geoJson);
-        }else if(typeof properties.geoJson === 'string' && !!isValidURL(properties.geoJson)){
+        }else if(typeof properties.geoJson === 'string'){
             fetch(properties.geoJson).then(response => {
                 return response.json()
 

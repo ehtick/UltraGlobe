@@ -55,15 +55,15 @@ class VectorLayer extends ImageryLayer {
 
         this.maxSegmentLength = properties.maxSegmentLength ? properties.maxSegmentLength : 50;
 
-        this.polygonOpacity = properties.polygonOpacity?properties.polygonOpacity:0.7;
-        this.polygonColor = properties.polygonColor?properties.polygonColor:new THREE.Color(0.0, 1.0, 0.0,0.75)
-        this.polygonSelectColor = properties.selectedPolygonColor?properties.selectedPolygonColor:new THREE.Color(1.0, 1.0, 0.0,0.75)
-        
-        this.lineMaterial = new THREE.LineBasicMaterial({ color: properties.polylineColor?properties.polylineColor:new THREE.Color(1.0,1.0,1.0) });
-        this.pointMaterial = new THREE.PointsMaterial({ color: properties.pointColor?properties.pointColor:new THREE.Color(0.0,0.0,1.0), size: 5, sizeAttenuation: false });
+        this.polygonOpacity = properties.polygonOpacity ? properties.polygonOpacity : 0.7;
+        this.polygonColor = properties.polygonColor ? properties.polygonColor : new THREE.Color(0.0, 1.0, 0.0, 0.75)
+        this.polygonSelectColor = properties.selectedPolygonColor ? properties.selectedPolygonColor : new THREE.Color(1.0, 1.0, 0.0, 0.75)
 
-        this.selectedLineMaterial = new THREE.LineBasicMaterial({ color: properties.selectedPolylineColor?properties.selectedPolylineColor:new THREE.Color(0.5,1.0,0.0) });
-        this.selectedPointMaterial = new THREE.PointsMaterial({ color: properties.selectedPointColor?properties.selectedPointColor:new THREE.Color(1.0,0.0,0.0), size: 5, sizeAttenuation: false });
+        this.lineMaterial = new THREE.LineBasicMaterial({ color: properties.polylineColor ? properties.polylineColor : new THREE.Color(1.0, 1.0, 1.0) });
+        this.pointMaterial = new THREE.PointsMaterial({ color: properties.pointColor ? properties.pointColor : new THREE.Color(0.0, 0.0, 1.0), size: 5, sizeAttenuation: false });
+
+        this.selectedLineMaterial = new THREE.LineBasicMaterial({ color: properties.selectedPolylineColor ? properties.selectedPolylineColor : new THREE.Color(0.5, 1.0, 0.0) });
+        this.selectedPointMaterial = new THREE.PointsMaterial({ color: properties.selectedPointColor ? properties.selectedPointColor : new THREE.Color(1.0, 0.0, 0.0), size: 5, sizeAttenuation: false });
 
 
 
@@ -142,12 +142,12 @@ class VectorLayer extends ImageryLayer {
             self.polygonMaxIndexCount = 0;
 
             self.batchedPolygon = new THREE.BatchedMesh(0, 0, 0);
-            self.batchedPolygon.material.transparent = self.polygonOpacity<1.0?true:false;
+            self.batchedPolygon.material.transparent = self.polygonOpacity < 1.0 ? true : false;
             self.batchedPolygon.material.opacity = self.polygonOpacity;
             self.batchedPolygon.material.side = THREE.DoubleSide;
             self.batchedPolygon.uuids = [];
             self.object3D.add(self.batchedPolygon);
-            
+
         }
         if (!properties) properties = {};
         if (!properties.uuid) properties.uuid = uuidv4();
@@ -360,7 +360,7 @@ class VectorLayer extends ImageryLayer {
             self.drapedPolygonMaxIndexCount = 0;
 
             self.drapedBatchedPolygon = new THREE.BatchedMesh(0, 0, 0);
-            self.drapedBatchedPolygon.material.transparent = self.polygonOpacity<1.0?true:false;
+            self.drapedBatchedPolygon.material.transparent = self.polygonOpacity < 1.0 ? true : false;
             self.drapedBatchedPolygon.material.opacity = self.polygonOpacity;
             self.drapedBatchedPolygon.sortObjects = false;
             self.drapedBatchedPolygon.uuids = [];
@@ -420,7 +420,7 @@ class VectorLayer extends ImageryLayer {
             if (!self.drapedBatchedPolygon.boundingBox || !self.drapedBatchedPolygon.boundingSphere) {
                 self.drapedBatchedPolygon.computeBoundingBox();
                 self.drapedBatchedPolygon.computeBoundingSphere();
-            }else{
+            } else {
                 self.drapedBatchedPolygon.boundingBox.union(polygonGeometry.boundingBox);
                 self.drapedBatchedPolygon.boundingSphere.union(polygonGeometry.boundingSphere);
             }
@@ -515,7 +515,7 @@ class VectorLayer extends ImageryLayer {
         if (!self.drapedScene) {
             self.drapedScene = new THREE.Scene();
         }
-        
+
         if (!properties) properties = {};
         if (!properties.uuid) properties.uuid = uuidv4();
         self.objects[properties.uuid] = {
@@ -589,6 +589,133 @@ class VectorLayer extends ImageryLayer {
         if (this.object3D) this.scene.add(this.object3D);
     }
 
+    /**
+     * calls the "condition" function with the specified property of every object and selects if the condition function returns true
+     * @param {string} propertyName 
+     * @param {function} condition 
+     */
+    selectByCondition(propertyName, condition) {
+        for (const [key, value] of Object.entries(this.objects)) {
+            if (value.properties && value.properties[propertyName] && condition(value.properties[propertyName])) {
+                this._selectByUUID(key)
+            }
+        }
+    }
+    /**
+         * calls the "condition" function with the specified property of every object and un-selects if the condition function returns true
+         * @param {string} propertyName 
+         * @param {function} condition 
+         */
+    unselectByCondition(propertyName, condition) {
+        for (const [key, value] of Object.entries(this.objects)) {
+            if (value.properties && value.properties[propertyName] && condition(value.properties[propertyName])) {
+                this._unselectByUUID(key)
+            }
+        }
+    }
+    _selectByUUID(uuid) {
+        const self = this;
+        const selectedElement = self.objects[uuid]
+        switch (selectedElement.type) {
+            case "points":
+                selectedElement.points.forEach(p => {
+                    p.material = this.selectedPointMaterial;
+                });
+                break;
+            case "polyline":
+                selectedElement.lines.forEach(l => {
+                    l.material = this.selectedLineMaterial;
+                });
+                break;
+            case "polygon":
+                selectedElement.lines.forEach(l => {
+                    l.material = this.selectedLineMaterial;
+                });
+                self.batchedPolygon.setColorAt(selectedElement.polygonInstanceID, self.polygonSelectColor)
+
+                break;
+            case "drapedPoints":
+                selectedElement.points.forEach(p => {
+                    p.material = this.selectedPointMaterial;
+                    invalidationBox.copy(p.geometry.boundingBox);
+                    invalidationBox.min.multiplyScalar(toRadians);
+                    invalidationBox.max.multiplyScalar(toRadians);
+                    self.invalidate(invalidationBox);
+                });
+                break;
+            case "drapedPolyline":
+                selectedElement.lines.forEach(l => {
+                    l.material = this.selectedLineMaterial;
+                    invalidationBox.copy(l.geometry.boundingBox);
+                    invalidationBox.min.multiplyScalar(toRadians);
+                    invalidationBox.max.multiplyScalar(toRadians);
+                    self.invalidate(invalidationBox);
+                });
+                break;
+            case "drapedPolygon":
+                selectedElement.lines.forEach(l => {
+                    l.material = this.selectedLineMaterial;
+                });
+                self.drapedBatchedPolygon.setColorAt(selectedElement.polygonInstanceID, self.polygonSelectColor)
+                invalidationBox.copy(selectedElement.polygonbbox);
+                invalidationBox.min.multiplyScalar(toRadians);
+                invalidationBox.max.multiplyScalar(toRadians);
+                self.invalidate(invalidationBox);
+
+                break;
+        }
+    }
+
+    _unselectByUUID(uuid) {
+        const self = this;
+        const selectedElement = this.objects[uuid]
+        switch (selectedElement.type) {
+            case "points":
+                selectedElement.points.forEach(p => {
+                    p.material = this.pointMaterial;
+                });
+                break;
+            case "polyline":
+                selectedElement.lines.forEach(l => {
+                    l.material = this.lineMaterial;
+                });
+                break;
+            case "polygon":
+                selectedElement.lines.forEach(l => {
+                    l.material = this.lineMaterial;
+                });
+                self.batchedPolygon.setColorAt(selectedElement.polygonInstanceID, self.polygonColor)
+                break;
+            case "drapedPoints":
+                selectedElement.points.forEach(p => {
+                    p.material = this.pointMaterial;
+                    invalidationBox.copy(p.geometry.boundingBox);
+                    invalidationBox.min.multiplyScalar(toRadians);
+                    invalidationBox.max.multiplyScalar(toRadians);
+                    self.invalidate(invalidationBox);
+                });
+                break;
+            case "drapedPolyline":
+                selectedElement.lines.forEach(l => {
+                    l.material = this.lineMaterial;
+                    invalidationBox.copy(l.geometry.boundingBox);
+                    invalidationBox.min.multiplyScalar(toRadians);
+                    invalidationBox.max.multiplyScalar(toRadians);
+                    self.invalidate(invalidationBox);
+                });
+                break;
+            case "drapedPolygon":
+                selectedElement.lines.forEach(l => {
+                    l.material = this.lineMaterial;
+                });
+                self.drapedBatchedPolygon.setColorAt(selectedElement.polygonInstanceID, self.polygonColor)
+                invalidationBox.copy(selectedElement.polygonbbox);
+                invalidationBox.min.multiplyScalar(toRadians);
+                invalidationBox.max.multiplyScalar(toRadians);
+                self.invalidate(invalidationBox);
+                break;
+        }
+    }
 
     _setMap(map) {
         this.map = map;
@@ -597,106 +724,12 @@ class VectorLayer extends ImageryLayer {
         map.addSelectionListener(selections => {
             selections.selected.forEach(selectedObject => {
                 if (selectedObject.layer.id == this.id) {
-                    const selectedElement = this.objects[selectedObject.uuid]
-                    switch (selectedElement.type) {
-                        case "points":
-                            selectedElement.points.forEach(p => {
-                                p.material = this.selectedPointMaterial;
-                            });
-                            break;
-                        case "polyline":
-                            selectedElement.lines.forEach(l => {
-                                l.material = this.selectedLineMaterial;
-                            });
-                            break;
-                        case "polygon":
-                            selectedElement.lines.forEach(l => {
-                                l.material = this.selectedLineMaterial;
-                            });
-                            self.batchedPolygon.setColorAt(selectedElement.polygonInstanceID, self.polygonSelectColor)
-
-                            break;
-                        case "drapedPoints":
-                            selectedElement.points.forEach(p => {
-                                p.material = this.selectedPointMaterial;
-                                invalidationBox.copy(p.geometry.boundingBox);
-                                invalidationBox.min.multiplyScalar(toRadians);
-                                invalidationBox.max.multiplyScalar(toRadians);
-                                self.invalidate(invalidationBox);
-                            });
-                            break;
-                        case "drapedPolyline":
-                            selectedElement.lines.forEach(l => {
-                                l.material = this.selectedLineMaterial;
-                                invalidationBox.copy(l.geometry.boundingBox);
-                                invalidationBox.min.multiplyScalar(toRadians);
-                                invalidationBox.max.multiplyScalar(toRadians);
-                                self.invalidate(invalidationBox);
-                            });
-                            break;
-                        case "drapedPolygon":
-                            selectedElement.lines.forEach(l => {
-                                l.material = this.selectedLineMaterial;
-                            });
-                            self.drapedBatchedPolygon.setColorAt(selectedElement.polygonInstanceID, self.polygonSelectColor)
-                            invalidationBox.copy(selectedElement.polygonbbox);
-                            invalidationBox.min.multiplyScalar(toRadians);
-                            invalidationBox.max.multiplyScalar(toRadians);
-                            self.invalidate(invalidationBox);
-
-                            break;
-                    }
+                    self._selectByUUID(selectedObject.uuid)
                 }
             });
             selections.unselected.forEach(selectedObject => {
                 if (selectedObject.layer.id == this.id) {
-                    const selectedElement = this.objects[selectedObject.uuid]
-                    switch (selectedElement.type) {
-                        case "points":
-                            selectedElement.points.forEach(p => {
-                                p.material = this.pointMaterial;
-                            });
-                            break;
-                        case "polyline":
-                            selectedElement.lines.forEach(l => {
-                                l.material = this.lineMaterial;
-                            });
-                            break;
-                        case "polygon":
-                            selectedElement.lines.forEach(l => {
-                                l.material = this.lineMaterial;
-                            });
-                            self.batchedPolygon.setColorAt(selectedElement.polygonInstanceID, self.polygonColor)
-                            break;
-                        case "drapedPoints":
-                            selectedElement.points.forEach(p => {
-                                p.material = this.pointMaterial;
-                                invalidationBox.copy(p.geometry.boundingBox);
-                                invalidationBox.min.multiplyScalar(toRadians);
-                                invalidationBox.max.multiplyScalar(toRadians);
-                                self.invalidate(invalidationBox);
-                            });
-                            break;
-                        case "drapedPolyline":
-                            selectedElement.lines.forEach(l => {
-                                l.material = this.lineMaterial;
-                                invalidationBox.copy(l.geometry.boundingBox);
-                                invalidationBox.min.multiplyScalar(toRadians);
-                                invalidationBox.max.multiplyScalar(toRadians);
-                                self.invalidate(invalidationBox);
-                            });
-                            break;
-                        case "drapedPolygon":
-                            selectedElement.lines.forEach(l => {
-                                l.material = this.lineMaterial;
-                            });
-                            self.drapedBatchedPolygon.setColorAt(selectedElement.polygonInstanceID, self.polygonColor)
-                            invalidationBox.copy(selectedElement.polygonbbox);
-                            invalidationBox.min.multiplyScalar(toRadians);
-                            invalidationBox.max.multiplyScalar(toRadians);
-                            self.invalidate(invalidationBox);
-                            break;
-                    }
+                    self._unselectByUUID(selectedObject.uuid)
                 }
             })
         })

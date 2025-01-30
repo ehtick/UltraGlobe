@@ -101,16 +101,17 @@ var perlinElevation = new PerlinElevationLayer({
     bounds: [-180, -90, 180, 90]
 });
 
-/* var googleMaps3DTiles = new GoogleMap3DTileLayer({
+const googleMaps3DTiles = new GoogleMap3DTileLayer({
     id: 3848,
     name: "Google Maps 3D Tiles",
     visible: true,
     apiKey: "", // replace with your google maps API key
     loadOutsideView: false,
-    geometricErrorMultiplier:0.75,
-    //loadingStrategy: "IMMEDIATE", // uncomment to use immediate loading (faster with gaps)
+    geometricErrorMultiplier: 0.75,
+    loadingStrategy: "INCREMENTAL", // uncomment to use immediate loading (faster with gaps)
     displayCopyright: true,
-});  */
+    //meshCallback: (mesh, geometricError)=>{mesh.material.wireframe = true}
+});
 var shaderLayer = new PerlinTerrainColorShader({
     id: 22,
     name: "randomGroundColor",
@@ -198,7 +199,7 @@ var wmsLayer3 = new WMSLayer({
     layer: "GPW_Population_Density_2020",
     epsg: "EPSG:4326",
     version: "1.3.0",
-    visible: true,
+    visible: false,
     maxLOD: 5,
     transparency: 0.0,
     imageSize: 512
@@ -224,7 +225,7 @@ var singleImage = new SingleImageImageryLayer({
 
 
 const progressBar = document.getElementById("progressBar");
-var ogc3dTiles = new OGC3DTilesLayer({
+/* var ogc3dTiles = new OGC3DTilesLayer({
     id: 65988,
     //splats: false,
     name: "OGC 3DTiles",
@@ -241,7 +242,45 @@ var ogc3dTiles = new OGC3DTilesLayer({
     scaleZ: 10000,
     geometricErrorMultiplier: 1,
     loadOutsideView: false,
+}); */
+
+const ogc3dTiles = new OGC3DTilesLayer({
+    id: 65988,
+    url: "http://localhost:8085/tileset.json",
+    name: "snowbird",
+    visible: false,
+    loadOutsideView: false,
+    geometricErrorMultiplier: 0.25,
+    loadingStrategy: "INCREMENTAL",
+    //cacheSize: 200,50°37'10"N 5°34'06"E
+    longitude: 5.5684995,
+    latitude: 50.619717,
+    height: 170,
+    pitch: -180,
+    roll: -0.5,
+    yaw: -68,
+    scaleX: 163.85,
+    scaleY: 163.85,
+    scaleZ: 163.85,
+    splats: true
 });
+setInterval(() => {
+    ogc3dTiles.setVisible(!ogc3dTiles.visible);
+}, 1000)
+
+const geometry = new THREE.SphereGeometry(3, 32, 16);
+const material = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+const sphere = new THREE.Mesh(geometry, material);
+const objectLayer = new ObjectLayer({
+    id: 342,
+    name: "object",
+    object: sphere,
+    longitude: -111.64360565472917,
+    latitude: 40.56199596351942,
+    height: 3341,
+    scaleX: 1
+});
+//ogc3dTiles.setSplatsCropRadius(5)
 
 /* var ogc3dTiles = new OGC3DTilesLayer({
     id: 2,
@@ -280,33 +319,37 @@ var ogc3dTiles = new OGC3DTilesLayer({
         progressBar.innerHTML = (stats.percentageLoaded*100).toFixed(0) + '%';
     }
 }); */
-var environmentLayer = new NOAAGFSCloudsLayer({
+/* var environmentLayer = new NOAAGFSCloudsLayer({
     id: 84,
     name: "clouds"
-});
-/* var environmentLayer = new RandomCloudsLayer({
+}); */
+var environmentLayer = new RandomCloudsLayer({
     id: 84,
     name: "clouds",
     coverage: 0.45,
-    debug: false,
-    windSpeed: 0.0,
+    debug: true,
+    windSpeed: 0.2,
     minHeight: 20000,
     maxHeight: 40000,
-    quality: 0.5
-}); */
- const geoJsonLayerLayer = new GeoJsonLayer({
-    id: 7322,
-    name: "geo",
-    geoJson: "http://localhost:8085/countries.geojson",
-    selectable: true,
-    maxSegmentLength: 100,
-    transparency:0,
-    polygonColor: new THREE.Color(0.0, 0.0, 0.0),
-    selectedPolygonColor: new THREE.Color(0.4, 0.15, 0.7),
-    polylineColor: new THREE.Color(1.0,1.0,1.0),
-    selectedPolylineColor: new THREE.Color(0.7,0.5,0.9),
-    polygonOpacity: 1.0
+    quality: 0.5,
+    visible: true
 });
+/* const geoJsonLayerLayer = new GeoJsonLayer({
+   id: 7322,
+   name: "geo",
+   geoJson: "http://localhost:8085/countries.geojson",
+   selectable: true,
+   maxSegmentLength: 100,
+   transparency:0,
+   polygonColor: new THREE.Color(0.0, 0.0, 0.0),
+   selectedPolygonColor: new THREE.Color(0.4, 0.15, 0.7),
+   polylineColor: new THREE.Color(1.0,1.0,1.0),
+   selectedPolylineColor: new THREE.Color(0.7,0.5,0.9),
+   polygonOpacity: 1.0
+}); */
+
+
+
 /*const shpLayer = new SHPLayer({
     id: 7324,
     name: "shp",
@@ -346,7 +389,7 @@ function setupMap(globalElevationMap) {
     let map = new Map({
         divID: 'screen',
         clock: { timezone: true },
-        shadows: false,
+        shadows: true,
         debug: false,
         detailMultiplier: 1.0,
         ocean: false,
@@ -354,12 +397,12 @@ function setupMap(globalElevationMap) {
         atmosphereDensity: 1.0,
         sun: true,
         rings: false,
-        space: true,//new THREE.Vector3(1.0,0.2,0.5),
+        space: new THREE.Color(0.0, 0.0, 0.0),
         tileSize: 64,
         loadOutsideView: false,
         minHeightAboveGround: 20,
-        splatsOver:true
-        //targetFPS:5000
+        splatsOver: true,
+        targetFPS: 5000
         /* shadows: true,
         debug: false,
         detailMultiplier: 0.5,
@@ -392,6 +435,14 @@ function setupMap(globalElevationMap) {
     let h = 20;
     let m = 0;
     let s = 0;
+    map.moveAndLookAt({ x: 5.56833333, y: 50.61944444, z: 10000000 }, { x: 5.56833333, y: 50.61944444, z: 200 });
+
+    /* setTimeout(()=>{
+        map.setShadows(true)
+    }, 4000)
+    setTimeout(()=>{
+        map.setShadows(false)
+    }, 6000) */
     /* setInterval(()=>{
         const d = map.ultraClock.getDate();
         h = d.getHours();
@@ -423,15 +474,47 @@ function setupMap(globalElevationMap) {
     map.controller.append(new LookAtController(map.camera, map.domContainer, map));
     map.controller.append(new FirstPersonCameraController(map.camera, map.domContainer, map)); */
     //52.50921677914625, 13.405685233710862
-    //map.setLayer(perlinElevation, 0);
-    //map.setLayer(shaderLayer, 1);
+    map.setLayer(perlinElevation, 0);
+    map.setLayer(shaderLayer, 1);
+    //map.setLayer(earthElevation, 0);
+    map.setLayer(environmentLayer, 2);
+    //map.setLayer(ogc3dTiles, 3);
+    //map.setLayer(objectLayer, 4);
+    //map.setLayer(wmsLayer3,2);
     //map.setLayer(googleMaps3DTiles, 2);
-    map.setLayer(ogc3dTiles, 3);
-    map.setLayer(earthElevation, 0);
-    map.setLayer(singleImage, 5);
-    //map.setLayer(environmentLayer, 6);
-    map.setLayer(geoJsonLayerLayer, 7);
-    map.addSelectionListener(e => {
+    /* setTimeout(
+        () => {
+            map.showShadows();
+            map.setSpace(true)
+        }
+        , 5000)
+    setTimeout(
+        () => {
+            map.hideShadows();
+
+        }
+        , 10000)
+    setTimeout(
+            () => {
+                map.showShadows();
+    
+            }
+            , 15000) */
+    /* setTimeout(()=>{
+        wmsLayer3.setVisible(true);
+        wmsLayer3.transparency = 0.5;
+    },2000)
+    setTimeout(()=>{
+        wmsLayer3.setTransparency(0.0);
+    },4000) */
+
+
+    /* map.setLayer(geoJsonLayerLayer, 7);
+    geoJsonLayerLayer.selectByCondition("ADMIN", (v)=>v==='Pakistan')
+    setTimeout(()=>{
+        geoJsonLayerLayer.selectByCondition("ADMIN", (v)=>v==='Pakistan')
+    },10000); */
+    /* map.addSelectionListener(e => {
         //console.log(e)
         const selection = [];
         Object.keys(e.selection).forEach(layerID => {
@@ -444,7 +527,11 @@ function setupMap(globalElevationMap) {
 
         });
         displayObjects(selection);
-    })
+    }); */
+
+    /* setTimeout(()=>{
+        map.removeLayer(0)
+    },4000) */
 
 
 

@@ -1,5 +1,5 @@
 import { RasterLayer } from './RasterLayer.js';
-
+const IMAGERY_TRANSPARENCY_CHANGE = "imagery_transparency-change";
 /**
  * Base layer for imagery.
  * @class
@@ -32,7 +32,14 @@ class ImageryLayer extends RasterLayer{
 
      }
 
+     setTransparency(transparency) {
+        this.transparency = transparency;
+        for (const element in this.listeners) {
+            this.listeners[element](this, IMAGERY_TRANSPARENCY_CHANGE);
+        }
+    }
+
     
 }
 
-export{ImageryLayer}
+export{ImageryLayer, IMAGERY_TRANSPARENCY_CHANGE}

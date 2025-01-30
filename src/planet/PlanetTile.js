@@ -4,6 +4,7 @@ import { MeshStandardMaterial, Vector4 } from 'three';
 import { RasterLayer } from '../layers/RasterLayer.js';
 import { LAYERS_CHANGED } from '../layers/LayerManager.js'
 import { VISIBILITY_CHANGE } from '../layers/Layer.js';
+import { IMAGERY_TRANSPARENCY_CHANGE } from '../layers/ImageryLayer.js';
 import { TerrainMeshGenerator } from './TerrainMeshGenerator';
 
 const terrainMeshGenerator = new TerrainMeshGenerator();
@@ -78,18 +79,8 @@ function buildZeroTexture() {
 
 const tilesToLoad = [];
 function scheduleLoadLayers(tile) {
-    /* const length = tilesToLoad.length;
-    for (let index = 0; index < tilesToLoad.length; index++) {
-        if (tilesToLoad[index] == tile) return;
-        if (tilesToLoad[index].priority > tile.priority) {
-            tilesToLoad.splice(index, 0, tile);
-            return;
-        }
-    }
-    if (tilesToLoad.length == length) {
-        tilesToLoad.push(tile);
-    } */
-    tilesToLoad.push(tile);
+
+    if (!tilesToLoad.includes(tile)) tilesToLoad.push(tile);
 }
 
 
@@ -148,21 +139,18 @@ class PlanetTile extends THREE.Mesh {
         self.priority = self.level;
         self.mapRequests = []; // collects texture requests in order to abort them when needed
         self.shadows = properties.shadows;
-        if (properties.shadows) {
-            self.skirt.castShadow = false;
-            self.skirt.receiveShadow = true;
-            self.castShadow = true
-            self.receiveShadow = true;
-
-            //mesh.material.flatShading = true;
-        }
+        self.skirt.castShadow = false;
+        self.skirt.receiveShadow = true;
+        self.castShadow = true
+        self.receiveShadow = true;
 
 
         //Listen to changes in the list of layers, rebuild material if raster layer
         self.layerManager.addListener(self.planetTileUid, (eventName, layer) => {
             if (LAYERS_CHANGED === eventName && layer instanceof RasterLayer) {
                 scheduleLoadLayers(self);
-            } else {
+            }
+            else {
                 this.buildMaterial(self)
             }
         });
@@ -211,9 +199,9 @@ class PlanetTile extends THREE.Mesh {
                     delete self.layerDataMap[layer.id];
 
                     let elevationPromise;
-                    if(!!self.parent.isPlanetTile && layer.maxResolution > ((self.bounds.max.x - self.bounds.min.x)*6371000)/self.tileSize ){
+                    if (!!self.parent.isPlanetTile && layer.maxResolution > ((self.bounds.max.x - self.bounds.min.x) * 6371000) / self.tileSize) {
                         elevationPromise = layer._getElevationFromParent(self.parent.bounds, self.parent.layerDataMap[layer.id].extendedElevationArray, self.bounds, self.tileSize, self.tileSize, self.geometry, self.skirt.geometry);
-                    }else{
+                    } else {
                         elevationPromise = layer.getElevation(self.bounds, self.tileSize, self.tileSize, self.geometry, self.skirt.geometry);
                     }
                     elevationPromise.then(elevationAndShift => {
@@ -382,7 +370,7 @@ class PlanetTile extends THREE.Mesh {
                     // self.material.visible = false;
                     return true;
                 }
-            } else if(self.elevationLoaded){ // if self tile doesn't have children yet
+            } else if (self.elevationLoaded) { // if self tile doesn't have children yet
                 const lengthUp = 111319 * (self.bounds.max.y - self.bounds.min.y);
                 const lengthSide = Math.cos((self.bounds.min.y + self.bounds.max.y) * 0.5) * 111319 * (self.bounds.max.x - self.bounds.min.x);
 
@@ -510,9 +498,9 @@ class PlanetTile extends THREE.Mesh {
                 }
             }
             self.layerManager._getShaderColorLayers([]).forEach(function (layer) {
-                if (layer.isShaderColorLayer && layer.visible) {
+                if (layer.isShaderColorLayer) {
                     shaderColorLayerCode = layer.shader;
-                    shaderColorLayerTransparency = layer.transparency;
+                    shaderColorLayerTransparency = layer.visible ? layer.transparency : 1;
                     shaderColorLayerTextures = layer.textures;
                 }
             });
@@ -521,7 +509,7 @@ class PlanetTile extends THREE.Mesh {
             numLayers = Math.max(numLayers, 1);
             if (obc) obc(shader);
             self.material.userData.shader = shader;
-            
+
             shader.vertexShader = shader.vertexShader.replace(
                 '#include <uv_pars_vertex>',
                 PlanetTileShaderChunks.vertexPreMain() +
@@ -580,7 +568,7 @@ class PlanetTile extends THREE.Mesh {
         self.layerManager.getLayers().forEach(layer => {
             if (layer.isRasterLayer) {
                 let layerData = self.layerDataMap[layer.id];
-                if (!!layerData && layer.isImageryLayer && !!layer.visible) {
+                if (!!layerData && layer.isImageryLayer) {
                     imagery.push(layerData.texture);
                     imageryBounds.push(new Vector4(layer.bounds.min.x, layer.bounds.min.y, layer.bounds.max.x, layer.bounds.max.y));
                     imageryTransparency.push(layer.visible ? layer.transparency : 1);

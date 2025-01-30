@@ -27,11 +27,12 @@ import { cartesianToLlhFastSFCT, llhToCartesianFastSFCT } from "./GeoUtils.js";
 import { ultraClock } from './controls/clock';
 import { PositionBufferShaderMaterial } from "./materials/PositionBufferShaderMaterial.js";
 import { cameraEase, getCameraLLHYawPitchRoll } from "./utils/CameraHelper.js"
+import { FXAA } from './utils/FXAA.js'
 
 
 // reused variables
 const tempClearColor = new THREE.Color();
-const splatsClearColor = new THREE.Color(1,1,1);
+const splatsClearColor = new THREE.Color(1, 1, 1);
 const depths = new Uint8Array(4);
 const depth24 = new THREE.Vector3();
 const unpacker = new THREE.Vector3(1, 1 / 256, 1 / (256 * 256));
@@ -88,10 +89,11 @@ class Map {
         const self = this;
         self.isMobile = _isMobileDevice();
         self.positionBufferMaterial = PositionBufferShaderMaterial();
+        this.planetHidden = false;
         this.previousCameraPosition = new THREE.Vector3();
         this.previousCameraRotation = new THREE.Euler();
         this.loadOutsideView = properties.loadOutsideView ? properties.loadOutsideView : false;
-        this.splatsOver = properties.splatsOver?true:false;
+        this.splatsOver = properties.splatsOver ? true : false;
         if (properties.targetFPS) {
             self.targetFPS = properties.targetFPS;
         } else {
@@ -100,11 +102,12 @@ class Map {
         self.tileSize = properties.tileSize ? properties.tileSize : 32;
         self.tileImagerySize = properties.tileImagerySize ? properties.tileImagerySize : 256;
 
+        this.ambientLight;
         this.detailMultiplier = properties.detailMultiplier ? properties.detailMultiplier : 1.0;
         this.layerManager = new LayerManager();
         this.layerManager.addListener("mapEnvLayerListener", this._layersChangedListener());
         this.debug = properties.debug;
-        this.shadows = properties.shadows;
+        this.shadows = false;
         this.rings = properties.rings;
         this.postCamera = new THREE.OrthographicCamera(- 1, 1, 1, - 1, 0, 1);
         if (this.rings) {
@@ -132,8 +135,19 @@ class Map {
         this.camera.layers.enable(31);
         this.renderCamera = this.camera.clone();
 
+        this.ultraClock = ultraClock(properties.clock);
+        this.ultraClock.addListener(date => self._setDate(date));
+
+
+        this.ocean = properties.ocean;
+        this.atmosphere = properties.atmosphere;
+        if (!!this.atmosphere && !this.atmosphere.isVector3) this.atmosphere = new THREE.Vector3(0.1, 0.4, 1.0);
+        this.atmosphereDensity = properties.atmosphereDensity ? properties.atmosphereDensity : 1.0;
+        this.sunColor = properties.sun;
+
+        this._initRenderer();
         this.scene = !!properties.scene ? properties.scene : this._initScene(properties.shadows);
-        this.splatsScene = this._initSplatsScene(properties.shadows);
+        this.splatsScene = this._initSplatsScene();
 
         if (properties.space && properties.space.isColor) {
             this.space = false;
@@ -158,28 +172,20 @@ class Map {
             this.scene.add(axesHelper);
         }
 
-        this.ultraClock = ultraClock(properties.clock);
-        this.ultraClock.addListener(date => self._setDate(date));
-
-
-        this.ocean = properties.ocean;
-        this.atmosphere = properties.atmosphere;
-        if (!!this.atmosphere && !this.atmosphere.isVector3) this.atmosphere = new THREE.Vector3(0.1, 0.4, 1.0);
-        this.atmosphereDensity = properties.atmosphereDensity ? properties.atmosphereDensity : 1.0;
-        this.sunColor = properties.sun;
 
 
 
-        this._initRenderer(properties.shadows);
+
+
         this._initLabelRenderer();
 
-        this._initPlanet(properties.shadows);
+        this._initPlanet();
         this._initController();
         this.scene.add(this.planet);
         this._setupRenderTarget();
         this._setupPostScene();
-        this._setupPostMaterial();
         this._setupSplatsComposeMaterial();
+        this._setupFXAAMaterial();
 
 
         this._setupDepthPassMaterial();
@@ -197,6 +203,17 @@ class Map {
 
 
 
+    }
+
+    hidePlanet() {
+        this.planetHidden = true;
+        this.planet._pauseRendering();
+        this.scene.remove(this.planet);
+    }
+    showPlanet() {
+        this.planetHidden = false;
+        this.planet._resumeRendering();
+        this.scene.add(this.planet);
     }
 
     _updateFlow() {
@@ -229,11 +246,9 @@ class Map {
      * @param {Date} date 
      */
     _setDate(date) {
-        if (this.shadows) {
-            this.sunPosition = getSunPosition(date);
-            if (this.csm) {
-                this.csm.lightDirection.copy(this.sunPosition).negate();
-            }
+        this.sunPosition = getSunPosition(date);
+        if (this.csm) {
+            this.csm.lightDirection.copy(this.sunPosition).negate();
         }
     }
 
@@ -298,20 +313,20 @@ class Map {
         return this.layerManager.getLayerByID(id);
     }
 
-    
+
 
     _layersChangedListener() {
         const self = this;
-        return () => {
+        return (event, layer) => {
             let cloudsLayerEncountered = false;
             self.layerManager.getLayers().forEach(layer => {
+
                 if (layer.isCloudsLayer && !cloudsLayerEncountered) {
                     if (layer.visible) {
                         cloudsLayerEncountered = true;
                         if (!self.cloudsLayer || self.cloudsLayer != layer) {
                             self.cloudsLayer = layer;
                             if (!layer.isInitialized) self.cloudsLayer._init(self);
-                            console.log("new clouds layer loaded");
                         }
                     }
 
@@ -322,6 +337,9 @@ class Map {
                     layer._init(self);
 
                 }
+                if (!cloudsLayerEncountered) {
+                    self.cloudsLayer = undefined;
+                }
             })
         }
 
@@ -329,104 +347,147 @@ class Map {
     _initSplatsScene() {
         return new THREE.Scene();
     }
-    _initScene() {
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x000000);
 
-
-        if (this.shadows) {
-
-            this.sunPosition = getSunPosition(new Date())
-            const csmSplits = [];
-            for (let i = 0; i < 8; i++) {
-                if (i == 0) csmSplits.push(1);
-                else {
-                    csmSplits.push(csmSplits[i - 1] * 3.2);
-                }
+    _initCSM() {
+        this.sunPosition = getSunPosition(new Date())
+        const csmSplits = [];
+        for (let i = 0; i < 8; i++) {
+            if (i == 0) csmSplits.push(1);
+            else {
+                csmSplits.push(csmSplits[i - 1] * 3.2);
             }
-            for (let i = 0; i < csmSplits.length; i++) {
-                csmSplits[i] /= csmSplits[csmSplits.length - 1];
-            }
-            this.csm = new CSM({
-                maxFar: 500000,
-                cascades: csmSplits.length,
-                mode: "custom",
-                customSplitsCallback: (cascadeCount, nearDistance, farDistance, target) => {
-                    target.push(...csmSplits);
-                },
-                fade: true,
-                parent: scene,
-                shadowMapSize: this.isMobile ? 1024 : 2048,
-                lightIntensity: 3.5,
-                lightDirection: this.sunPosition.clone().negate(),
-                lightMargin: 500000,
-                shadowBias: -0.000001,
-                //noLastCascadeCutOff: true,
-                //shadowNormalBias : -5000,
-                camera: this.camera
-            });
-            this.csm.csmSplits = csmSplits;
-
-            for (let i = 0; i < this.csm.lights.length; i++) {
-                this.csm.lights[i].shadow.bias = 0.00025 * csmSplits[i];
-                this.csm.lights[i].shadow.normalBias = 0.1;
-                this.csm.lights[i].shadow.camera.near = 1;
-                this.csm.lights[i].shadow.camera.updateProjectionMatrix();
-                this.csm.lights[i].shadow.camera.far = this.csm.lightMargin + this.csm.maxFar * 2 * csmSplits[i];
-                this.csm.lights[i].shadow.needsUpdate = true;
-            }
-            //this.sun.shadow.bias = -0.005;
-
-
-
-            scene.add(new THREE.AmbientLight(0xFFFFFF, 0.8));
-
-            if (this.debug) {
-                this.csmHelper = new CSMHelper(this.csm);
-                this.csmHelper.visible = true;
-                scene.add(this.csmHelper);
-                const self = this;
-                document.addEventListener('keyup', (e) => {
-                    if (e.key === 'u') {
-                        console.log("csmHelper update");
-                        self.csmHelper.update();
-                    }
-                });
-
-                document.addEventListener('keyup', (e) => {
-                    if (e.key === 'a') {
-                        for (let i = 0; i < this.csm.lights.length; i++) {
-                            this.csm.lights[i].shadow.normalBias *= 2;
-                            this.csm.lights[i].shadow.needsUpdate = true;
-                        }
-                    }
-                    if (e.key === 'q') {
-                        for (let i = 0; i < this.csm.lights.length; i++) {
-                            this.csm.lights[i].shadow.normalBias *= 0.5;
-                            this.csm.lights[i].shadow.needsUpdate = true;
-                        }
-                        console.log("normalBiasDown " + this.csm.lights[0].shadow.normalBias);
-                    }
-                    if (e.key === 'z') {
-                        for (let i = 0; i < this.csm.lights.length; i++) {
-                            this.csm.lights[i].shadow.bias *= 2;
-                            this.csm.lights[i].shadow.needsUpdate = true;
-                        }
-                    }
-                    if (e.key === 's') {
-                        for (let i = 0; i < this.csm.lights.length; i++) {
-                            this.csm.lights[i].shadow.bias *= 0.5;
-                            this.csm.lights[i].shadow.needsUpdate = true;
-                        }
-                        console.log("BiasDown " + this.csm.lights[0].shadow.bias);
-                    }
-                });
-            }
-
-        } else {
-            scene.add(new THREE.AmbientLight(0xFFFFFF, 3.0));
         }
-        return scene;
+        for (let i = 0; i < csmSplits.length; i++) {
+            csmSplits[i] /= csmSplits[csmSplits.length - 1];
+        }
+        this.csm = new CSM({
+            maxFar: 500000,
+            cascades: csmSplits.length,
+            mode: "custom",
+            customSplitsCallback: (cascadeCount, nearDistance, farDistance, target) => {
+                target.push(...csmSplits);
+            },
+            fade: true,
+            parent: this.scene,
+            shadowMapSize: this.isMobile ? 1024 : 2048,
+            lightIntensity: 3.5,
+            lightDirection: this.sunPosition.clone().negate(),
+            lightMargin: 500000,
+            shadowBias: -0.000001,
+            //noLastCascadeCutOff: true,
+            //shadowNormalBias : -5000,
+            camera: this.camera
+        });
+        this.csm.csmSplits = csmSplits;
+
+        for (let i = 0; i < this.csm.lights.length; i++) {
+            this.csm.lights[i].shadow.bias = 0.00025 * csmSplits[i];
+            this.csm.lights[i].shadow.normalBias = 0.1;
+            this.csm.lights[i].shadow.camera.near = 1;
+            this.csm.lights[i].shadow.camera.updateProjectionMatrix();
+            this.csm.lights[i].shadow.camera.far = this.csm.lightMargin + this.csm.maxFar * 2 * csmSplits[i];
+            this.csm.lights[i].shadow.needsUpdate = true;
+        }
+
+        if (this.debug) {
+            this.csmHelper = new CSMHelper(this.csm);
+            this.csmHelper.visible = true;
+            this.scene.add(this.csmHelper);
+            const self = this;
+            document.addEventListener('keyup', (e) => {
+                if (e.key === 'u') {
+                    console.log("csmHelper update");
+                    self.csmHelper.update();
+                }
+            });
+
+            document.addEventListener('keyup', (e) => {
+                if (e.key === 'a') {
+                    for (let i = 0; i < this.csm.lights.length; i++) {
+                        this.csm.lights[i].shadow.normalBias *= 2;
+                        this.csm.lights[i].shadow.needsUpdate = true;
+                    }
+                }
+                if (e.key === 'q') {
+                    for (let i = 0; i < this.csm.lights.length; i++) {
+                        this.csm.lights[i].shadow.normalBias *= 0.5;
+                        this.csm.lights[i].shadow.needsUpdate = true;
+                    }
+                    console.log("normalBiasDown " + this.csm.lights[0].shadow.normalBias);
+                }
+                if (e.key === 'z') {
+                    for (let i = 0; i < this.csm.lights.length; i++) {
+                        this.csm.lights[i].shadow.bias *= 2;
+                        this.csm.lights[i].shadow.needsUpdate = true;
+                    }
+                }
+                if (e.key === 's') {
+                    for (let i = 0; i < this.csm.lights.length; i++) {
+                        this.csm.lights[i].shadow.bias *= 0.5;
+                        this.csm.lights[i].shadow.needsUpdate = true;
+                    }
+                    console.log("BiasDown " + this.csm.lights[0].shadow.bias);
+                }
+            });
+        }
+    }
+    /**
+     * Display shading and shadows
+     */
+    showShadows() {
+        if (this.shadows == true) return;
+        for (let i = 0; i < this.csm.lights.length; i++) {
+
+            this.csm.parent.add(this.csm.lights[i].target);
+            this.csm.parent.add(this.csm.lights[i]);
+
+        }
+        this.ambientLight.intensity = 0.8;
+        this.shadows = true;
+        this.renderer.shadowMap.enabled = true;
+        this._disposePostMaterial();
+        this._setupPostMaterial();
+
+        if(this.cloudsLayer){
+            this.cloudsLayer._setShadows();
+        }
+        
+    }
+    /**
+     * Remove shading and shadows
+     */
+    hideShadows() {
+        if (this.shadows == false) return;
+        for (let i = 0; i < this.csm.lights.length; i++) {
+
+            this.csm.parent.remove(this.csm.lights[i].target);
+            this.csm.parent.remove(this.csm.lights[i]);
+
+        }
+        this.ambientLight.intensity = 3.0;
+        this.shadows = false;
+        this.renderer.shadowMap.enabled = false;
+        this._disposePostMaterial();
+        this._setupPostMaterial();
+        if(this.cloudsLayer){
+            this.cloudsLayer._setNoShadows();
+        }
+    }
+    _initScene(shadowsOn) {
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x000000);
+        this._initCSM();
+        this.ambientLight = new THREE.AmbientLight(0xFFFFFF, 0.8);
+        this.scene.add(this.ambientLight);
+        this.shadows = true;
+        if (!shadowsOn) {
+            this.hideShadows();
+        } else {
+            this.renderer.shadowMap.enabled = true;
+            this._setupPostMaterial();
+        }
+
+        return this.scene;
     }
 
     _setupRenderTarget() {
@@ -436,8 +497,8 @@ class Map {
         this.target = new THREE.WebGLRenderTarget(this.domContainer.offsetWidth, this.domContainer.offsetHeight);
         this.target.texture.format = THREE.RGBAFormat;
         this.target.texture.colorSpace = THREE.SRGBColorSpace;
-        this.target.texture.minFilter = THREE.NearestFilter;
-        this.target.texture.magFilter = THREE.NearestFilter;
+        this.target.texture.minFilter = THREE.LinearFilter;
+        this.target.texture.magFilter = THREE.LinearFilter;
         this.target.texture.premultiplyAlpha = true;
         this.target.texture.generateMipmaps = false;
         this.target.stencilBuffer = false;
@@ -445,7 +506,7 @@ class Map {
         this.target.depthTexture = new THREE.DepthTexture();
         this.target.depthTexture.format = THREE.DepthFormat;
         this.target.depthTexture.type = THREE.FloatType;
-        this.target.samples = 2;
+        this.target.samples = 1;
 
         // the depth render target is used to render depth to the main texture so that it can read retrieved on the CPU
         if (this.depthTarget) this.depthTarget.dispose();
@@ -473,7 +534,7 @@ class Map {
         this.target2.depthTexture = new THREE.DepthTexture();
         this.target2.depthTexture.format = THREE.DepthFormat;
         this.target2.depthTexture.type = THREE.FloatType;
-        this.target2.samples = 2;
+        this.target2.samples = 1;
 
 
         if (this.targetWorld) this.targetWorld.dispose();
@@ -568,7 +629,7 @@ class Map {
                 otherTexture: { value: undefined },
                 splatsDepthTexture: { value: undefined },
                 otherDepthTexture: { value: undefined },
-                
+
                 splatsOver: { value: this.splatsOver }
             },
             transparent: false,
@@ -587,6 +648,94 @@ class Map {
         this.postScene.add(this.postQuad);
         this.postScene.matrixAutoUpdate = false;
         this.postQuad.matrixAutoUpdate = false;
+    }
+
+    /**
+     * set rings
+     * @param {Boolean|Object} [rings = false] Rings properties, if undefined, no rings are drawn, if "true", random rings are drawn
+     * - param {THREE.Vector3} [rings.origin=new THREE.Vector3()] the center point of the rings
+     * - param {THREE.Vector3} [rings.normal=new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).normalize()] the orientation of the rings plane
+     * - param {Number} [rings.innerRadius=6378137.0 * (1.1+Math.random())] the rings inner radius
+     * - param {Number} [rings.outerRadius=this.rings.innerRadius+(0.1+Math.random())*6378137.0] the rings outer radius
+     * - param {Number} [rings.colorMap=Math.random()] a modulation on the ring colors
+     * - param {Number} [rings.colorMapDisplace=Math.random()] rings displacement in a loop
+     */
+    setRings(rings) {
+        if (this.rings != rings) {
+            this.rings = rings;
+            if (this.rings) {
+                if (!(typeof this.rings === 'object' && Array.isArray(this.rings))) this.rings = {};
+                if (!this.rings.origin) this.rings.origin = new THREE.Vector3();
+                if (!this.rings.normal) this.rings.normal = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+                if (!this.rings.innerRadius) this.rings.innerRadius = 6378137.0 * (1.1 + Math.random());
+                if (!this.rings.outerRadius) this.rings.outerRadius = this.rings.innerRadius + (0.1 + Math.random()) * 6378137.0;
+                if (!this.rings.colorMap) this.rings.colorMap = Math.random();
+                if (!this.rings.colorMapDisplace) this.rings.colorMapDisplace = Math.random();
+            }
+            this._disposePostMaterial();
+            this._setupPostMaterial();
+        }
+    }
+    /**
+     * set space background
+    * @param {Boolean|Object|THREE.Color} [space = true] if undefined, a default space backgound is drawn. Space can also be a single opaque color as a THREE.Color or a properties object
+    * - param {Number} [space.starsIntensity=0.75] The intensity of stars
+    * - param {Number} [space.gasCloudsIntensity=0.25] the intensity of nebula like gasClouds
+    * - param {Number} [space.colorMap=Math.random()] a modulation on gas cloud colors
+    * - param {Number} [space.texRotation1= Math.random()*Math.PI] a texture rotation to avoid obvious repetition.
+    * - param {Number} [space.texRotation2 = Math.random()*Math.PI] a texture rotation to avoid obvious repetition.
+    */
+    setSpace(space) {
+
+        if (this.space != space) {
+            if (space && space.isColor) {
+                this.space = false;
+                this.scene.background = space;
+            } else {
+                this.space = space;
+                if (this.space) {
+                    if (!(typeof this.space === 'object' && Array.isArray(this.space))) this.space = {};
+                    if (!this.space.starsIntensity) this.space.starsIntensity = 0.75;
+                    if (!this.space.gasCloudsIntensity) this.space.gasCloudsIntensity = 0.5;//Math.random();
+                    if (!this.space.colorMap) this.space.colorMap = Math.random();
+                    if (!this.space.texRotation1) this.space.texRotation1 = Math.random() * Math.PI;
+                    if (!this.space.texRotation2) this.space.texRotation2 = Math.random() * Math.PI;
+                }
+            }
+            this._disposePostMaterial();
+            this._setupPostMaterial();
+        }
+    }
+    _disposePostMaterial() {
+        if (this.postMaterial) {
+            if (this.postMaterial.uniforms.opticalDepth.value) {
+                this.postMaterial.uniforms.opticalDepth.value.dispose();
+            }
+            if (this.postMaterial.uniforms.ringsPalette.value) {
+                this.postMaterial.uniforms.ringsPalette.value.dispose();
+            }
+            if (this.postMaterial.uniforms.water1.value) {
+                this.postMaterial.uniforms.water1.value.dispose();
+            }
+            if (this.postMaterial.uniforms.water2.value) {
+                this.postMaterial.uniforms.water2.value.dispose();
+            }
+            if (this.postMaterial.uniforms.perlin.value) {
+                this.postMaterial.uniforms.perlin.value.dispose();
+            }
+            if (this.postMaterial.uniforms.starsTexture.value) {
+                this.postMaterial.uniforms.starsTexture.value.dispose();
+            }
+            if (this.postMaterial.uniforms.nebulaTexture.value) {
+                this.postMaterial.uniforms.nebulaTexture.value.dispose();
+            }
+            if (this.postMaterial.uniforms.nebulaPalette.value) {
+                this.postMaterial.uniforms.nebulaPalette.value.dispose();
+            }
+            this.postMaterial.dispose();
+            this.postMaterial = undefined;
+        }
+
     }
     _setupPostMaterial() {
 
@@ -776,6 +925,15 @@ class Map {
 
     }
 
+    _setupFXAAMaterial() {
+        this.fxaaMaterial = new THREE.ShaderMaterial({
+            vertexShader: FXAA.vertexShader,
+            fragmentShader: FXAA.fragmentShader,
+            uniforms: FXAA.uniforms,
+            depthTest: false,
+            depthWrite: false
+        });
+    }
 
     _setupDepthPassMaterial() {
         this.depthPassMaterial = new THREE.ShaderMaterial({
@@ -814,19 +972,15 @@ class Map {
 
     }
 
-    _initRenderer(shadows) {
+    _initRenderer() {
         let self = this;
-        self.renderer = new THREE.WebGLRenderer({ antialias: true, maxSamples: 4, logarithmicDepthBuffer: true, stencil: false, preserveDrawingBuffer: false, powerPreference: "high-performance" });
+        self.renderer = new THREE.WebGLRenderer({ antialias: false, maxSamples: 1, logarithmicDepthBuffer: true, stencil: false, preserveDrawingBuffer: false, powerPreference: "high-performance" });
         //self.renderer.getContext().getProgramInfoLog= function() { return '' }
         //self.renderer.debug.checkShaderErrors = false;
-        if (shadows) {
-            self.renderer.shadowMap.enabled = true;
-            if (self.isMobile) {
-                self.renderer.shadowMap.type = THREE.PCFShadowMap;
-            } else {
-                self.renderer.shadowMap.type = THREE.PCFShadowMap;
-            }
-
+        if (self.isMobile) {
+            self.renderer.shadowMap.type = THREE.PCFShadowMap;
+        } else {
+            self.renderer.shadowMap.type = THREE.PCFShadowMap;
         }
 
         self.renderer.setPixelRatio(1)
@@ -1035,7 +1189,7 @@ class Map {
                     self.splatsScene.position.set(-self.camera.position.x, -self.camera.position.y, -self.camera.position.z);
                     self.splatsScene.updateMatrix();
                     self.splatsScene.updateMatrixWorld(true);
-                    self.layerManager.layers.forEach((layer) => {
+                    self.layerManager.getLayers().forEach((layer) => {
 
                         if (layer.isOGC3DTilesLayer) {
                             layer._updateMatrices();
@@ -1059,11 +1213,11 @@ class Map {
 
                 let hasVideo = false;
                 let hasSplats = false;
-                self.layerManager.layers.forEach(layer => {
+                self.layerManager.getLayers().forEach(layer => {
                     if (layer.isOGC3DTilesLayer) {
 
                         layer.update(self.renderCamera);
-                        if (layer.isSplats) {
+                        if (layer.isSplats && layer.visible) {
                             hasSplats = true;
                         }
                     }
@@ -1093,7 +1247,7 @@ class Map {
                     self.renderer.setClearColor(splatsClearColor, 0.0);
                     self.renderer.clearColor();
                     self.renderer.render(self.splatsScene, self.renderCamera);
-                    self.layerManager.layers.forEach(layer => {
+                    self.layerManager.getLayers().forEach(layer => {
                         if (layer.isOGC3DTilesLayer) {
                             if (layer.isSplats) {
                                 layer.setDepthMaterial(self.renderCamera);
@@ -1109,7 +1263,7 @@ class Map {
                     self.renderer.render(self.splatsScene, self.renderCamera);
                     self.renderer.setClearColor(tempClearColor, tempAlpha);
 
-                    self.layerManager.layers.forEach(layer => {
+                    self.layerManager.getLayers().forEach(layer => {
                         if (layer.isOGC3DTilesLayer) {
                             if (layer.isSplats) {
                                 layer.setRenderMaterial();
@@ -1118,7 +1272,7 @@ class Map {
                     });
                     /// compose depth
 
-                    
+
                     self.splatsComposeMaterial.uniforms.splatsTexture.value = self.targetSplats.texture;
                     self.splatsComposeMaterial.uniforms.otherTexture.value = renderTexture;
                     self.splatsComposeMaterial.uniforms.splatsDepthTexture.value = self.targetSplatsDepth.texture;
@@ -1126,16 +1280,16 @@ class Map {
                     self.splatsComposeMaterial.uniforms.splatsOver.value = self.splatsOver;
 
                     self.renderer.setRenderTarget(self.targetSplatsCompose);
-                    
+
                     self.renderer.clearColor();
                     self.postQuad.material = self.splatsComposeMaterial;
                     self.renderer.render(self.postScene, self.postCamera);
-                    
+
 
                     //renderTexture = self.targetSplatsDepth.texture;
                     //renderDepth = self.targetSplatsDepth.texture;
                     renderTexture = self.targetSplatsCompose.textures[0];//self.targetSplatsCompose.textures[0];
-                    
+
                     renderDepth = self.targetSplatsCompose.textures[1];
                     //renderTexture = self.targetSplatsDepth.texture;
                 }
@@ -1190,7 +1344,7 @@ class Map {
 
 
 
-                    self.layerManager.layers.forEach(layer => {
+                    self.layerManager.getLayers().forEach(layer => {
                         if (layer.isProjectedLayer && layer.visible && layer.isReady()) {
                             if (true) {
                                 layer.projectionRenderCamera.copy(layer.projectionCamera, true);
@@ -1253,6 +1407,9 @@ class Map {
                     self.cloudsLayer.render(self);
                     self.postMaterial.uniforms.tClouds.value = self.cloudsLayer.getOutputTexture();
                     self.postMaterial.uniforms.tCloudsDepth.value = self.cloudsLayer.getOutputDepthTexture();
+                } else {
+                    self.postMaterial.uniforms.tClouds.value = undefined;
+                    self.postMaterial.uniforms.tCloudsDepth.value = undefined;
                 }
 
                 /// post final
@@ -1280,9 +1437,16 @@ class Map {
 
 
 
-                self.renderer.setRenderTarget(null);
+                self.renderer.setRenderTarget(self.target);
                 self.postQuad.material = self.postMaterial;
                 self.renderer.render(self.postScene, self.postCamera);
+
+                self.fxaaMaterial.uniforms.tDiffuse.value = self.target.texture;
+                self.fxaaMaterial.uniforms.resolution.value = new THREE.Vector2(1 / self.target.width, 1 / self.target.height);
+                self.postQuad.material = self.fxaaMaterial;
+                self.renderer.setRenderTarget(null);
+                self.renderer.render(self.postScene, self.postCamera);
+
                 self.labelRenderer.render(self.scene, self.camera);
 
 
@@ -1389,7 +1553,7 @@ class Map {
      */
     moveAndLookAt(cameraPosition, cameraAim, ease = undefined) {
         const self = this;
-        if(!ease){
+        if (!ease) {
             self.camera.position.copy(self.planet.llhToCartesian.forward(cameraPosition));
             const target = self.planet.llhToCartesian.forward(cameraAim);
             self.camera.up.copy(self.camera.position).normalize()
@@ -1398,7 +1562,7 @@ class Map {
             self.resetCameraNearFar();
             self.setCameraUp();
         }
-        else{
+        else {
             // first infer yaw pitch roll and camera lon lat height
             const targetCamera = self.camera.clone();
             targetCamera.position.copy(self.planet.llhToCartesian.forward(cameraPosition));
@@ -1408,13 +1572,13 @@ class Map {
             self.moveCameraAboveSurface(targetCamera);
             self.setCameraUp(targetCamera);
 
-            cameraEase(self.camera, getCameraLLHYawPitchRoll(self.camera), getCameraLLHYawPitchRoll(targetCamera), ease.time, ease.function, (aCamera)=>{
+            cameraEase(self.camera, getCameraLLHYawPitchRoll(self.camera), getCameraLLHYawPitchRoll(targetCamera), ease.time, ease.function, (aCamera) => {
                 self.moveCameraAboveSurface();
                 self.resetCameraNearFar();
                 self.setCameraUp();
             }, ease.callback);
         }
-        
+
     }
 
 

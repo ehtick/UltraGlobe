@@ -1,6 +1,7 @@
 import { VISIBILITY_CHANGE } from "./Layer";
 import { ShaderColorLayer } from "./ShaderColorLayer";
 const LAYERS_CHANGED = "layers-changed";
+
 /**
  * The Layer manager keeps track of loaded layers and their order and sends events when there is a change.
  */
@@ -11,10 +12,10 @@ class LayerManager{
     }
 
     _pauseRendering(){
-        this.layers.forEach(layer=>layer._pauseRendering());
+        this.getLayers().forEach(layer=>layer._pauseRendering());
     }
     _resumeRendering(){
-        this.layers.forEach(layer=>layer._resumeRendering());
+        this.getLayers().forEach(layer=>layer._resumeRendering());
     }
 
     /**
@@ -61,7 +62,7 @@ class LayerManager{
             if(dispose && this.layers[index].dispose){
                 this.layers[index].dispose();
             }
-            this.layers[index] = void 0;
+            this.layers[index] = undefined;
         }
     }
     
@@ -70,8 +71,7 @@ class LayerManager{
      * @returns {Layer[]} the list of layers
      */
     getLayers(){
-        
-        return this.layers;
+        return this.layers.filter(element => element !== undefined);
     }
 
     /**
@@ -88,7 +88,7 @@ class LayerManager{
     }
     
     _getRasterLayers(sideEffect){
-        this.layers.forEach(element => {
+        this.getLayers().forEach(element => {
             if(element.isRasterLayer){
                 sideEffect.push(element);
             }
@@ -96,7 +96,7 @@ class LayerManager{
         return sideEffect;
     }
     _getImageryLayers(sideEffect){
-        this.layers.forEach(element => {
+        this.getLayers().forEach(element => {
             if(element.isImageryLayer){
                 sideEffect.push(element);
             }
@@ -105,7 +105,7 @@ class LayerManager{
     }
 
     _getShaderColorLayers(sideEffect){
-        this.layers.forEach(element => {
+        this.getLayers().forEach(element => {
             if(element.isShaderColorLayer){
                 sideEffect.push(element);
             }
